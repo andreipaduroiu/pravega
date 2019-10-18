@@ -16,7 +16,9 @@ import io.pravega.common.LoggerHelpers;
 import io.pravega.common.ObjectClosedException;
 import io.pravega.common.Timer;
 import io.pravega.common.concurrent.Futures;
+import io.pravega.common.io.EnhancedByteArrayOutputStream;
 import io.pravega.common.util.ArrayView;
+import io.pravega.common.util.ByteArraySegment;
 import io.pravega.common.util.CloseableIterator;
 import io.pravega.common.util.RetriesExhaustedException;
 import io.pravega.common.util.Retry;
@@ -42,6 +44,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
+import java.util.zip.GZIPOutputStream;
 import javax.annotation.concurrent.GuardedBy;
 import javax.annotation.concurrent.ThreadSafe;
 import lombok.SneakyThrows;
@@ -450,8 +453,16 @@ class BookKeeperLog implements DurableDataLog {
                     throw new RetriesExhaustedException(w.getFailureCause());
                 }
 
+                ArrayView data =w.data;
+                // TODO: Compress every BK write.
+//                EnhancedByteArrayOutputStream bas = new EnhancedByteArrayOutputStream();
+//                GZIPOutputStream z = new GZIPOutputStream(bas);
+//                z.write(data.array(), data.arrayOffset(),data.getLength());
+//                z.finish();
+//                data = bas.getData();
+
                 // Invoke the BookKeeper write.
-                w.getWriteLedger().ledger.asyncAddEntry(w.data.array(), w.data.arrayOffset(), w.data.getLength(), this::addCallback, w);
+                w.getWriteLedger().ledger.asyncAddEntry(data.array(), data.arrayOffset(), data.getLength(), this::addCallback, w);
             } catch (Throwable ex) {
                 // Synchronous failure (or RetriesExhausted). Fail current write.
                 boolean isFinal = !isRetryable(ex);

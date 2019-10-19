@@ -19,7 +19,6 @@ import io.pravega.common.util.BitConverter;
 import io.pravega.common.util.ByteArraySegment;
 import io.pravega.test.integration.selftest.adapters.TruncateableArray;
 import java.io.IOException;
-import java.util.Random;
 import lombok.Getter;
 import lombok.SneakyThrows;
 
@@ -204,14 +203,14 @@ public class Event implements ProducerUpdate {
         return payload;
     }
 
-    private final Random rnd = new Random(0);
     private void writeContent(byte[] result, int offset) {
-
+        //Random rnd = new Random(this.sequence);
         int nextValue = this.sequence;
         while (offset < result.length) {
-            result[offset++] = (byte) (rnd.nextInt() % Byte.MAX_VALUE);
-//            result[offset++] = (byte) (nextValue % 255 + Byte.MIN_VALUE);
-//            nextValue += this.routingKey + 1;
+            //            result[offset++] = (byte) (rnd.nextInt(255) + Byte.MIN_VALUE);
+
+            result[offset++] = (byte) (nextValue % 255 + Byte.MIN_VALUE);
+            nextValue += this.routingKey + 1;
         }
     }
 

@@ -12,15 +12,20 @@ package io.pravega.segmentstore.server.host;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.LoggerContext;
 import io.pravega.common.Timer;
-import io.pravega.common.util.ArrayView;
+import io.pravega.common.hash.Entropy;
 import io.pravega.common.util.ByteArraySegment;
+import io.pravega.segmentstore.storage.impl.bookkeeper.Compressor;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.CompletionException;
+import java.util.stream.Collectors;
 import java.util.zip.GZIPOutputStream;
-import lombok.Data;
 import lombok.val;
 import org.slf4j.LoggerFactory;
 
@@ -38,24 +43,23 @@ public class Playground {
         final int max = 1024 * 1024;
 
         //val tests = generateStructuredData(max, rnd);
-        val tests = generateSemiRandomData(1000, max, rnd);
+        //val tests = generateSemiRandomData(1000, max, rnd);
         //val tests = generateRandomData(1000, max, rnd);
+        val tests = generateFileData();
         int compressibleCount = 0;
         int compressibleCorrect = 0;
         int incompressibleCount = 0;
         int incompressibleCorrect = 0;
 
-        long includeNanos = 0;
         long totalCheckNanos = 0;
         long totalCompressNanos = 0;
+        val compressor = new Compressor();
         for (val a : tests) {
-            val ic = new IsCompressible();
             val checkTimer = new Timer();
-            ic.include(new ByteArraySegment(a), 8);
-            includeNanos += checkTimer.getElapsedNanos();
-
-            val eval = ic.evaluate();
-            boolean isCompressible = eval.isCompressible();
+            val e = new Entropy();
+            e.include(new ByteArraySegment(a), Compressor.SAMPLE_COUNT, Compressor.SAMPLE_SIZE);
+            double entropy = e.getEntropy();
+            boolean isCompressible = entropy < Compressor.ENTROPY_THRESHOLD;
             totalCheckNanos += checkTimer.getElapsedNanos();
 
             val compressTimer = new Timer();
@@ -63,10 +67,10 @@ public class Playground {
             val gzip = new GZIPOutputStream(bas);
             gzip.write(a);
             gzip.finish();
+            gzip.close();
             totalCompressNanos += compressTimer.getElapsedNanos();
             double ratio = (double) bas.size() / a.length;
-//            System.out.println(String.format("L: %3.0f%%, E: %.3f IC: %s",
-//                    ratio * 100, eval.getEntropy(), eval.isCompressible()));
+            System.out.println(String.format("L: %3.0f%%, E: %.3f IC: %s", ratio * 100, entropy, isCompressible));
 
             if (ratio <= compressibleRatio) {
                 compressibleCount++;
@@ -86,7 +90,6 @@ public class Playground {
                 compressibleCount,
                 (int) ((double) incompressibleCorrect / incompressibleCount * 100),
                 incompressibleCount));
-        System.out.println(String.format("Include time per item (ms): %.1f", (double) includeNanos / 1000_000 / tests.size()));
         System.out.println(String.format("Eval time per item (ms): %.1f", (double) totalCheckNanos / 1000_000 / tests.size()));
         System.out.println(String.format("Compress time per item (ms): %.1f", (double) totalCompressNanos / 1000_000 / tests.size()));
     }
@@ -156,67 +159,29 @@ public class Playground {
         return result;
     }
 
-    private static class IsCompressible {
-        private final int DICTIONARY_SIZE = 256;
-        private final int DATA_LENGTH_THRESHOLD = 512;
-        private final double ENTROPY_THRESHOLD = 10;
-        private final int[] pairCounts = new int[DICTIONARY_SIZE * DICTIONARY_SIZE];
-        private int totalPairCount = 0;
+    private static List<byte[]> generateFileData() {
+        val paths = new ArrayList<String>();
+        collectFilePaths("/home/andrei/src/pravega", paths);
+        return paths.stream()
+                    .map(p -> {
+                        try {
+                            return Files.readAllBytes(Paths.get(p));
+                        } catch (Exception ex) {
+                            throw new CompletionException(ex);
+                        }
+                    })
+                    .collect(Collectors.toList());
+    }
 
-        private final int MAX_SAMPLE_SIZE = 16 * 1024;
-
-        void include(ArrayView array, int sampleCount) {
-            int sampleRegionSize = array.getLength() / sampleCount;
-            for (int i = 0; i < sampleCount; i++) {
-                val sample = (ArrayView) array.slice(i * sampleRegionSize, Math.min(MAX_SAMPLE_SIZE, sampleRegionSize));
-                include(sample);
+    private static void collectFilePaths(String rootDir, ArrayList<String> paths) {
+        File[] faFiles = new File(rootDir).listFiles();
+        for (File file : faFiles) {
+            if (file.isDirectory()) {
+                collectFilePaths(file.getAbsolutePath(), paths);
+            } else if (file.length() > 4096) {
+                paths.add(file.getPath());
             }
-        }
-
-        void include(ArrayView array) {
-            for (int i = 1; i < array.getLength(); i++) {
-                totalPairCount++;
-                byte a = array.get(i - 1);
-                byte b = array.get(i);
-                int pairIdx = ((a + 128) % DICTIONARY_SIZE) * DICTIONARY_SIZE + ((b + 128) % DICTIONARY_SIZE);
-                pairCounts[pairIdx]++;
-            }
-        }
-
-
-        EvaluationResult evaluate() {
-            double entropy = 0;
-            for (int c : this.pairCounts) {
-                if (c != 0) {
-                    double p = (double) c / totalPairCount;
-                    entropy += p * Math.log(p);
-                }
-            }
-
-            entropy *= -1;
-
-            boolean isCompressible = isCompressible(Integer.MAX_VALUE, entropy);
-            return new EvaluationResult(entropy, isCompressible);
-        }
-
-
-        private boolean isCompressible(int length, double entropy) {
-            if (length < DATA_LENGTH_THRESHOLD) {
-                return false;
-            }
-
-            if (entropy < ENTROPY_THRESHOLD) {
-                return true;
-            }
-
-            return false;
-        }
-
-
-        @Data
-        static class EvaluationResult {
-            final double entropy;
-            final boolean compressible;
         }
     }
+
 }

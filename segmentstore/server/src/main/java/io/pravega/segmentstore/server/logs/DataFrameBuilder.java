@@ -17,7 +17,6 @@ import io.pravega.segmentstore.server.logs.operations.CompletableOperation;
 import io.pravega.segmentstore.storage.DurableDataLog;
 import io.pravega.segmentstore.storage.LogAddress;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CancellationException;
@@ -26,7 +25,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.zip.GZIPOutputStream;
 import javax.annotation.concurrent.NotThreadSafe;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -142,12 +140,6 @@ class DataFrameBuilder<T extends SequencedItemList.Element> implements AutoClose
 
             // Completely serialize the entry. Note that this may span more than one Data Frame.
             this.lastStartedSequenceNumber = seqNo;
-
-            // TODO: Compress every operation when serializing it. Severe penalty for less than 10KB.
-//            GZIPOutputStream z = new GZIPOutputStream(this.outputStream);
-//            this.serializer.serialize(z, logItem);
-//            z.finish();
-
             this.serializer.serialize(this.outputStream, logItem);
 
             // Indicate to the output stream that have finished writing the record.

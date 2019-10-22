@@ -26,6 +26,9 @@ import io.pravega.client.stream.TransactionalEventStreamWriter;
 import io.pravega.client.stream.TxnFailedException;
 import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.ExecutorServiceHelpers;
+import io.pravega.common.hash.Entropy;
+import io.pravega.common.io.EnhancedByteArrayOutputStream;
+import io.pravega.common.util.ByteArraySegment;
 import io.pravega.common.util.ByteBufferUtils;
 import io.pravega.common.util.Retry;
 import java.nio.ByteBuffer;
@@ -42,7 +45,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+import java.util.zip.GZIPOutputStream;
 import javax.annotation.concurrent.GuardedBy;
+import lombok.SneakyThrows;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 
@@ -119,11 +124,30 @@ public class EventStreamWriterImpl<Type> implements EventStreamWriter<Type>, Tra
         Preconditions.checkNotNull(routingKey);
         return writeEventInternal(routingKey, event);
     }
-    
+
+    @SneakyThrows
     private CompletableFuture<Void> writeEventInternal(String routingKey, Type event) {
         Preconditions.checkNotNull(event);
         Exceptions.checkNotClosed(closed.get(), this);
-        ByteBuffer data = serializer.serialize(event);
+        ByteBuffer data1 = serializer.serialize(event);
+        ByteBuffer data = null;
+        if (data1.remaining() >= 100) {
+            Entropy e = new Entropy();
+            e.include(new ByteArraySegment(data1), 8, 16384);
+            if (e.getEntropy() < 10) {
+                EnhancedByteArrayOutputStream eos = new EnhancedByteArrayOutputStream();
+                GZIPOutputStream zip = new GZIPOutputStream(eos);
+                zip.write(data1.array(), data1.arrayOffset(), data1.remaining());
+                zip.finish();
+                ByteArraySegment bas = eos.getData();
+                data = ByteBuffer.wrap(bas.array(), bas.arrayOffset(), bas.getLength());
+            }
+        }
+        if (data == null) {
+            data = data1;
+        }
+
+
         CompletableFuture<Void> ackFuture = new CompletableFuture<Void>();
         synchronized (writeFlushLock) {
             synchronized (writeSealLock) {                

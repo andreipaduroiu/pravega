@@ -12,10 +12,11 @@ package io.pravega.segmentstore.server.host;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.LoggerContext;
 import io.pravega.common.Timer;
-import io.pravega.common.hash.Entropy;
+import io.pravega.common.util.ArrayView;
 import io.pravega.common.util.ByteArraySegment;
-import io.pravega.segmentstore.storage.impl.bookkeeper.Compressor;
-import java.io.ByteArrayOutputStream;
+import io.pravega.common.util.compression.CompressionCodec;
+import io.pravega.common.util.compression.MultiInputCompressor;
+import io.pravega.common.util.compression.ZLibCompressionCodec;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -25,7 +26,6 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletionException;
 import java.util.stream.Collectors;
-import java.util.zip.GZIPOutputStream;
 import lombok.val;
 import org.slf4j.LoggerFactory;
 
@@ -41,11 +41,14 @@ public class Playground {
         val rnd = new Random(0);
         final double compressibleRatio = 0.8;
         final int max = 1024 * 1024;
+        final int preCompressSize = 32 * 1024;
+
+        val codec = new ZLibCompressionCodec();
 
         //val tests = generateStructuredData(max, rnd);
-        //val tests = generateSemiRandomData(1000, max, rnd);
+        val tests = generateSemiRandomData(1000, max, rnd);
         //val tests = generateRandomData(1000, max, rnd);
-        val tests = generateFileData();
+        //val tests = generateFileData();
         int compressibleCount = 0;
         int compressibleCorrect = 0;
         int incompressibleCount = 0;
@@ -53,36 +56,51 @@ public class Playground {
 
         long totalCheckNanos = 0;
         long totalCompressNanos = 0;
-        val compressor = new Compressor();
+        int compressedCount = 0;
         for (val a : tests) {
-            val checkTimer = new Timer();
-            val e = new Entropy();
-            e.include(new ByteArraySegment(a), Compressor.SAMPLE_COUNT, Compressor.SAMPLE_SIZE);
-            double entropy = e.getEntropy();
-            boolean isCompressible = entropy < Compressor.ENTROPY_THRESHOLD;
-            totalCheckNanos += checkTimer.getElapsedNanos();
+            val input = new ByteArraySegment(a);
 
             val compressTimer = new Timer();
-            val bas = new ByteArrayOutputStream();
-            val gzip = new GZIPOutputStream(bas);
-            gzip.write(a);
-            gzip.finish();
-            gzip.close();
-            totalCompressNanos += compressTimer.getElapsedNanos();
-            double ratio = (double) bas.size() / a.length;
-            System.out.println(String.format("L: %3.0f%%, E: %.3f IC: %s", ratio * 100, entropy, isCompressible));
+            val c1 = compress(codec, input, preCompressSize, compressibleRatio);
+            boolean wasCompressed = c1 != null;
+            if (wasCompressed) {
+                totalCompressNanos += compressTimer.getElapsedNanos();
+                compressedCount++;
+            } else {
+                totalCheckNanos += compressTimer.getElapsedNanos();
+            }
+
+            // Compress the whole thing anyway to verify compressibility.
+            val actualCompressed = compress(codec, input, input.getLength(), 100.0);
+            double ratio = (double) actualCompressed.getLength() / a.length;
+            System.out.println(String.format("CR: %3.0f%%, Compressed: E = %s, A = %s",
+                    ratio * 100, ratio <= compressibleRatio, wasCompressed));
 
             if (ratio <= compressibleRatio) {
                 compressibleCount++;
-                if (isCompressible) {
+                if (wasCompressed) {
                     compressibleCorrect++;
                 }
             } else {
                 incompressibleCount++;
-                if (!isCompressible) {
+                if (!wasCompressed) {
                     incompressibleCorrect++;
                 }
             }
+//
+//            if (c1 != null) {
+//                // Check that it was compressed correctly.
+//                val c2 = new ByteArraySegment(new byte[max]);
+//                int decompressedLength = codec.decompress(c1, c2);
+//                if (decompressedLength != input.getLength()) {
+//                    throw new Exception("decompressed size differs ");
+//                }
+//                for (int i = 0; i < input.getLength(); i++) {
+//                    if (input.get(i) != c2.get(i)) {
+//                        throw new Exception("differs at index " + i);
+//                    }
+//                }
+//            }
         }
 
         System.out.println(String.format("\nAccuracy: Compressible = %s%% (%s), Incompressible = %s%% (%s)",
@@ -90,8 +108,27 @@ public class Playground {
                 compressibleCount,
                 (int) ((double) incompressibleCorrect / incompressibleCount * 100),
                 incompressibleCount));
-        System.out.println(String.format("Eval time per item (ms): %.1f", (double) totalCheckNanos / 1000_000 / tests.size()));
-        System.out.println(String.format("Compress time per item (ms): %.1f", (double) totalCompressNanos / 1000_000 / tests.size()));
+        System.out.println(String.format("Time per compressed item (ms): %.1f", (double) totalCompressNanos / 1000_000 / compressedCount));
+        System.out.println(String.format("Time per non-compressed item (ms): %.1f", (double) totalCheckNanos / 1000_000 / (tests.size() - compressedCount)));
+    }
+
+
+    private static ArrayView compress(CompressionCodec compressionCodec, ArrayView source, int checkThreshold, double maxRatio) {
+        // TODO maybe smaller buffer for testing, then allocate big buffer? Maybe stitch two together?
+        int sizeEstimate = (int) Math.ceil(source.getLength() * 1.001 + 14);
+        ByteArraySegment compressed = new ByteArraySegment(new byte[sizeEstimate]);
+
+        checkThreshold = Math.min(checkThreshold, source.getLength());
+
+        MultiInputCompressor compressor = compressionCodec.compressTo(compressed);
+        compressor.include((ArrayView) source.slice(0, checkThreshold));
+        if ((double) compressor.getCompressedLength() / checkThreshold > maxRatio) {
+            return null;
+        } else if (checkThreshold < source.getLength()) {
+            compressor.include((ArrayView) source.slice(checkThreshold, source.getLength() - checkThreshold));
+        }
+
+        return compressor.getCompressedOutput();
     }
 
     private static List<byte[]> generateStructuredData(int max, Random rnd) {
@@ -152,7 +189,7 @@ public class Playground {
     private static List<byte[]> generateRandomData(int count, int max, Random rnd) {
         val result = new ArrayList<byte[]>();
         for (int i = 0; i < count; i++) {
-            byte[] data = new byte[rnd.nextInt(max) + 1];
+            byte[] data = new byte[max];
             rnd.nextBytes(data);
             result.add(data);
         }

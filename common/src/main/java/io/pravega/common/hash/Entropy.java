@@ -15,6 +15,7 @@ import javax.annotation.concurrent.NotThreadSafe;
 import lombok.val;
 
 @NotThreadSafe
+@Deprecated
 public class Entropy {
     private static final int MAX_DICTIONARY_SIZE = Byte.MAX_VALUE - Byte.MIN_VALUE + 1; // 255
     private final int dictionarySize;

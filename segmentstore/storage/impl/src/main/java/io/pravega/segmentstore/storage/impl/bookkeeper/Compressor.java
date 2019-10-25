@@ -13,22 +13,25 @@ import com.google.common.annotations.VisibleForTesting;
 import io.pravega.common.SimpleMovingAverage;
 import io.pravega.common.Timer;
 import io.pravega.common.hash.Entropy;
-import io.pravega.common.io.EnhancedByteArrayOutputStream;
 import io.pravega.common.util.ArrayView;
-import java.io.IOException;
-import java.util.zip.GZIPOutputStream;
-import lombok.SneakyThrows;
+import io.pravega.common.util.ByteArraySegment;
+import io.pravega.common.util.compression.CompressionCodec;
+import io.pravega.common.util.compression.MultiInputCompressor;
+import io.pravega.common.util.compression.ZLibCompressionCodec;
 import lombok.val;
 
 public class Compressor {
-    @VisibleForTesting
-    public static final int SAMPLE_SIZE = 16 * 1024;
-    @VisibleForTesting
-    public static final int SAMPLE_COUNT = 8;
-    @VisibleForTesting
-    public static final double ENTROPY_THRESHOLD = 8.8;
+//        @VisibleForTesting
+//    public static final int SAMPLE_SIZE = 16 * 1024;
+//    @VisibleForTesting
+//    public static final int SAMPLE_COUNT = 8;
+//    @VisibleForTesting
+//    public static final double ENTROPY_THRESHOLD = 8.8;
     private static final int SIZE_THRESHOLD = 512 * 1024;
+    private static final int CHECK_LENGTH = 32 * 1024;
+    private static final double COMPRESSION_RATIO_THRESHOLD = 0.8;
     private static final int DEFAULT_COMPRESS_MILLIS = 25;
+    private static final CompressionCodec CODEC = new ZLibCompressionCodec();
 
     private final SimpleMovingAverage recentCompressTimes = new SimpleMovingAverage(8);
     private final SimpleMovingAverage recentWriteTimes = new SimpleMovingAverage(8);
@@ -37,21 +40,19 @@ public class Compressor {
         this.recentWriteTimes.add(millis);
     }
 
-    @SneakyThrows(IOException.class)
     public ArrayView compressIfNecessary(ArrayView input) {
         if (shouldCompress(input)) {
             val timer = new Timer();
-            EnhancedByteArrayOutputStream output = new EnhancedByteArrayOutputStream();
-            try (GZIPOutputStream z = new GZIPOutputStream(output)) {
-                z.write(input.array(), input.arrayOffset(), input.getLength());
-                z.finish();
+            ArrayView compressed = compress(input);
+            if (compressed != null) {
                 this.recentCompressTimes.add((int) timer.getElapsedMillis());
-                return output.getData();
+                return compressed;
             }
-        } else {
-            //System.out.println("NO COMPRESS: "+input.getLength());
-            return input;
         }
+
+        //System.out.println("NO COMPRESS: "+input.getLength());
+        return input;
+
     }
 
     public boolean shouldCompress(ArrayView input) {
@@ -68,14 +69,35 @@ public class Compressor {
             return false;
         }
 
-        Entropy e = new Entropy();
-        e.include(input, SAMPLE_COUNT, SAMPLE_SIZE);
-        double entropy = e.getEntropy();
-        if (entropy > ENTROPY_THRESHOLD) {
-            // Too random
-            return false;
-        }
+//        Entropy e = new Entropy();
+//        e.include(input, SAMPLE_COUNT, SAMPLE_SIZE);
+//        double entropy = e.getEntropy();
+//        if (entropy > ENTROPY_THRESHOLD) {
+//            // Too random
+//            return false;
+//        }
 
         return true;
+    }
+
+
+    private static ArrayView compress(ArrayView source) {
+        int sizeEstimate = (int) Math.ceil(source.getLength() * COMPRESSION_RATIO_THRESHOLD);
+        ByteArraySegment compressed = new ByteArraySegment(new byte[sizeEstimate]);
+//        val c = CODEC.compressTo(compressed);
+//        c.include(source);
+//        return c.getCompressedOutput();
+
+        int checkLength = Math.min(CHECK_LENGTH, source.getLength());
+
+        MultiInputCompressor compressor = CODEC.compressTo(compressed);
+        compressor.include((ArrayView) source.slice(0, checkLength));
+        if ((double) compressor.getCompressedLength() / checkLength > COMPRESSION_RATIO_THRESHOLD) {
+            return null;
+        } else if (checkLength < source.getLength()) {
+            compressor.include((ArrayView) source.slice(checkLength, source.getLength() - checkLength));
+        }
+
+        return compressor.getCompressedOutput();
     }
 }

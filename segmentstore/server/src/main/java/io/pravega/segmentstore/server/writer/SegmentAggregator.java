@@ -772,7 +772,8 @@ class SegmentAggregator implements WriterSegmentProcessor, AutoCloseable {
             flush = CompletableFuture.completedFuture(null);
         } else {
             flush = createSegmentIfNecessary(
-                    () -> this.storage.write(this.handle.get(), this.metadata.getStorageLength(), flushArgs.getStream(), flushArgs.getLength(), timer.getRemaining()),
+                    //() -> this.storage.write(this.handle.get(), this.metadata.getStorageLength(), flushArgs.getStream(), flushArgs.getLength(), timer.getRemaining()),
+                    () -> CompletableFuture.completedFuture(null),
                     timer.getRemaining());
         }
 

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -12,12 +12,12 @@ package io.pravega.client.netty.impl;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.util.concurrent.ScheduledFuture;
 import io.pravega.client.stream.impl.ConnectionClosedException;
 import io.pravega.common.Exceptions;
-import io.pravega.common.concurrent.Futures;
 import io.pravega.common.util.ReusableFutureLatch;
 import io.pravega.shared.metrics.MetricNotifier;
 import io.pravega.shared.protocol.netty.AppendBatchSizeTracker;
@@ -35,8 +35,8 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
+import static io.pravega.shared.NameUtils.writerTags;
 import static io.pravega.shared.metrics.ClientMetricKeys.CLIENT_OUTSTANDING_APPEND_COUNT;
-import static io.pravega.shared.segment.StreamSegmentNameUtils.writerTags;
 
 @Slf4j
 public class FlowHandler extends ChannelInboundHandlerAdapter implements AutoCloseable {
@@ -137,7 +137,13 @@ public class FlowHandler extends ChannelInboundHandlerAdapter implements AutoClo
      * @return Batch size Tracker object.
      */
     public AppendBatchSizeTracker getAppendBatchSizeTracker(final long requestID) {
-        return flowIDBatchSizeTrackerMap.get(Flow.toFlowID(requestID));
+        int flowID;
+        if (disableFlow.get()) {
+            flowID = FLOW_DISABLED;
+        } else {
+            flowID = Flow.toFlowID(requestID);
+        }
+        return flowIDBatchSizeTrackerMap.get(flowID);
     }
 
     /**
@@ -177,22 +183,22 @@ public class FlowHandler extends ChannelInboundHandlerAdapter implements AutoClo
     }
 
     /**
-     * This function completes the input future when the channel is registered.
+     * This function completes the input future when the channel is ready.
      *
-     * @param future CompletableFuture which will be completed once the channel is registered.
+     * @param future CompletableFuture which will be completed once the channel is ready.
      */
-    void completeWhenRegistered(final CompletableFuture<Void> future) {
+    void completeWhenReady(final CompletableFuture<Void> future) {
         Preconditions.checkNotNull(future, "future");
         registeredFutureLatch.register(future);
     }
 
     @Override
-    public void channelRegistered(ChannelHandlerContext ctx) throws Exception {
-        super.channelRegistered(ctx);
+    public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        super.channelActive(ctx);
         Channel ch = ctx.channel();
         channel.set(ch);
         log.info("Connection established with endpoint {} on channel {}", connectionName, ch);
-        ch.write(new WireCommands.Hello(WireCommands.WIRE_VERSION, WireCommands.OLDEST_COMPATIBLE_VERSION), ch.voidPromise());
+        ch.writeAndFlush(new WireCommands.Hello(WireCommands.WIRE_VERSION, WireCommands.OLDEST_COMPATIBLE_VERSION), ch.voidPromise());
         registeredFutureLatch.release(null); //release all futures waiting for channel registration to complete.
         // WireCommands.KeepAlive messages are sent for every network connection to a SegmentStore.
         ScheduledFuture<?> old = keepAliveFuture.getAndSet(ch.eventLoop().scheduleWithFixedDelay(new KeepAliveTask(), 20, 10, TimeUnit.SECONDS));
@@ -308,10 +314,10 @@ public class FlowHandler extends ChannelInboundHandlerAdapter implements AutoClo
         public void run() {
             try {
                 if (!recentMessage.getAndSet(false)) {
-                    Futures.getAndHandleExceptions(getChannel().writeAndFlush(new WireCommands.KeepAlive()), ConnectionFailedException::new);
+                    getChannel().writeAndFlush(new WireCommands.KeepAlive()).addListener(ChannelFutureListener.FIRE_EXCEPTION_ON_FAILURE);
                 }
             } catch (Exception e) {
-                log.warn("Keep alive failed, killing connection {} due to {}", connectionName, e.getMessage());
+                log.warn("Failed to send KeepAlive to {}. Closing this connection.", connectionName, e);
                 close();
             }
         }

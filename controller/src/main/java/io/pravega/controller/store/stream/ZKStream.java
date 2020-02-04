@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -497,6 +497,7 @@ class ZKStream extends PersistentStreamBase {
         return super.getAllOrderedCommittingTxnsHelper(txnCommitOrderer);
     }
 
+    @Override
     CompletableFuture<Version> createNewTransaction(final int epoch, final UUID txId, final ActiveTxnRecord txnRecord) {
         final String activePath = getActiveTxPath(epoch, txId.toString());
         // we will always create parent if needed so that transactions are created successfully even if the epoch znode

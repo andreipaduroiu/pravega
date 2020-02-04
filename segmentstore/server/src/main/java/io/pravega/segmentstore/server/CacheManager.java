@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ import io.pravega.common.Exceptions;
 import io.pravega.common.ObjectClosedException;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.common.concurrent.Services;
-import io.pravega.segmentstore.storage.cache.CacheSnapshot;
+import io.pravega.segmentstore.storage.cache.CacheState;
 import io.pravega.segmentstore.storage.cache.CacheStorage;
 import io.pravega.segmentstore.storage.cache.DirectMemoryCache;
 import java.util.ArrayList;
@@ -29,7 +29,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import javax.annotation.concurrent.GuardedBy;
 import javax.annotation.concurrent.ThreadSafe;
 import lombok.Getter;
-import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -46,7 +45,7 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @ThreadSafe
-public class CacheManager extends AbstractScheduledService implements AutoCloseable, CacheUtilizationProvider {
+public class CacheManager extends AbstractScheduledService implements AutoCloseable {
     //region Members
 
     private static final String TRACE_OBJECT_ID = "CacheManager";
@@ -58,14 +57,14 @@ public class CacheManager extends AbstractScheduledService implements AutoClosea
     @GuardedBy("lock")
     private int oldestGeneration;
     @GuardedBy("lock")
-    private CacheSnapshot lastSnapshot;
+    private CacheState lastCacheState;
     private final CachePolicy policy;
     private final AtomicBoolean closed;
     private final SegmentStoreMetrics.CacheManager metrics;
-    @GuardedBy("cleanupListeners")
-    private final HashSet<CleanupListener> cleanupListeners;
     @Getter
     private final CacheStorage cacheStorage;
+    @Getter
+    private final CacheUtilizationProvider utilizationProvider;
     private final Object lock = new Object();
 
     //endregion
@@ -99,9 +98,9 @@ public class CacheManager extends AbstractScheduledService implements AutoClosea
         this.oldestGeneration = 0;
         this.currentGeneration = 0;
         this.closed = new AtomicBoolean();
-        this.lastSnapshot = this.cacheStorage.getSnapshot();
+        this.lastCacheState = this.cacheStorage.getState();
         this.metrics = new SegmentStoreMetrics.CacheManager();
-        this.cleanupListeners = new HashSet<>();
+        this.utilizationProvider = new CacheUtilizationProvider(this.policy, this::getStoredBytes);
     }
 
     //endregion
@@ -120,6 +119,13 @@ public class CacheManager extends AbstractScheduledService implements AutoClosea
             }
 
             this.cacheStorage.close();
+            long pendingBytes = this.utilizationProvider.getPendingBytes();
+            if (pendingBytes > 0) {
+                log.error("{}: Closing with {} outstanding bytes. This indicates a leak somewhere.",
+                        TRACE_OBJECT_ID, pendingBytes);
+
+                assert false : "CacheManager closed with " + pendingBytes + " outstanding bytes."; // This will fail any unit tests.
+            }
             log.info("{} Closed.", TRACE_OBJECT_ID);
         }
     }
@@ -137,7 +143,7 @@ public class CacheManager extends AbstractScheduledService implements AutoClosea
     protected void runOneIteration() {
         boolean anythingEvicted = applyCachePolicy();
         if (anythingEvicted) {
-            notifyCleanupListeners();
+            this.utilizationProvider.notifyCleanupListeners();
         }
     }
 
@@ -145,41 +151,6 @@ public class CacheManager extends AbstractScheduledService implements AutoClosea
     protected Scheduler scheduler() {
         long millis = this.policy.getGenerationDuration().toMillis();
         return Scheduler.newFixedDelaySchedule(millis, millis, TimeUnit.MILLISECONDS);
-    }
-
-    //endregion
-
-    //region CacheUtilizationProvider Implementation
-
-    @Override
-    public double getCacheUtilization() {
-        // We use the total number of used bytes, which includes any overhead. This will provide a more accurate
-        // representation of the utilization than just the Stored Bytes.
-        synchronized (this.lock) {
-            return (double) this.lastSnapshot.getUsedBytes() / this.policy.getMaxSize();
-        }
-    }
-
-    @Override
-    public double getCacheTargetUtilization() {
-        return this.policy.getTargetUtilization();
-    }
-
-    @Override
-    public double getCacheMaxUtilization() {
-        return this.policy.getMaxUtilization();
-    }
-
-    @Override
-    public void registerCleanupListener(@NonNull CleanupListener listener) {
-        if (listener.isClosed()) {
-            log.warn("{} Attempted to register a closed Cleanup Listener ({}).", TRACE_OBJECT_ID, listener);
-            return;
-        }
-
-        synchronized (this.cleanupListeners) {
-            this.cleanupListeners.add(listener); // This is a Set, so we won't be adding the same listener twice.
-        }
     }
 
     //endregion
@@ -278,8 +249,8 @@ public class CacheManager extends AbstractScheduledService implements AutoClosea
     private boolean applyCachePolicyInternal() {
         // Run through all the active clients and gather status.
         CacheStatus currentStatus = collectStatus();
-        fetchSnapshot();
-        if (currentStatus == null || this.lastSnapshot.getStoredBytes() == 0) {
+        fetchCacheState();
+        if (currentStatus == null || this.lastCacheState.getStoredBytes() == 0) {
             // We either have no clients or we have clients and they do not have any data stored.
             return false;
         }
@@ -302,13 +273,13 @@ public class CacheManager extends AbstractScheduledService implements AutoClosea
         do {
             reducedInIteration = updateClients();
             if (reducedInIteration) {
-                fetchSnapshot();
+                fetchCacheState();
                 logCurrentStatus(currentStatus);
                 oldestChanged = adjustOldestGeneration(currentStatus);
                 reducedOverall = true;
             }
         } while (reducedInIteration && oldestChanged);
-        this.metrics.report(this.lastSnapshot, currentStatus.getNewestGeneration() - currentStatus.getOldestGeneration());
+        this.metrics.report(this.lastCacheState, currentStatus.getNewestGeneration() - currentStatus.getOldestGeneration());
         return reducedOverall;
     }
 
@@ -351,8 +322,8 @@ public class CacheManager extends AbstractScheduledService implements AutoClosea
     }
 
     @GuardedBy("lock")
-    private void fetchSnapshot() {
-        this.lastSnapshot = this.cacheStorage.getSnapshot();
+    private void fetchCacheState() {
+        this.lastCacheState = this.cacheStorage.getState();
     }
 
     @GuardedBy("lock")
@@ -430,7 +401,7 @@ public class CacheManager extends AbstractScheduledService implements AutoClosea
 
     @GuardedBy("lock")
     private boolean exceedsEvictionThreshold() {
-        return this.lastSnapshot.getUsedBytes() > this.policy.getEvictionThreshold();
+        return this.lastCacheState.getUsedBytes() > this.policy.getEvictionThreshold();
     }
 
     @GuardedBy("lock")
@@ -440,34 +411,12 @@ public class CacheManager extends AbstractScheduledService implements AutoClosea
 
     @GuardedBy("lock")
     private void logCurrentStatus(CacheStatus status) {
-        log.info("{} Gen: {}-{}, Clients: {}, Cache: {}.", TRACE_OBJECT_ID, this.currentGeneration, this.oldestGeneration, this.clients.size(), this.lastSnapshot);
+        log.info("{} Gen: {}-{}, Clients: {}, Cache: {}.", TRACE_OBJECT_ID, this.currentGeneration, this.oldestGeneration, this.clients.size(), this.lastCacheState);
     }
 
-    private void notifyCleanupListeners() {
-        ArrayList<CacheUtilizationProvider.CleanupListener> toNotify = new ArrayList<>();
-        ArrayList<CacheUtilizationProvider.CleanupListener> toRemove = new ArrayList<>();
-        synchronized (this.cleanupListeners) {
-            for (CacheUtilizationProvider.CleanupListener l : this.cleanupListeners) {
-                if (l.isClosed()) {
-                    toRemove.add(l);
-                } else {
-                    toNotify.add(l);
-                }
-            }
-
-            this.cleanupListeners.removeAll(toRemove);
-        }
-
-        for (CacheUtilizationProvider.CleanupListener l : toNotify) {
-            try {
-                l.cacheCleanupComplete();
-            } catch (Throwable ex) {
-                if (Exceptions.mustRethrow(ex)) {
-                    throw ex;
-                }
-
-                log.error("{}: Error while notifying cleanup listener {}.", TRACE_OBJECT_ID, l, ex);
-            }
+    private long getStoredBytes() {
+        synchronized (this.lock) {
+            return this.lastCacheState.getStoredBytes();
         }
     }
 

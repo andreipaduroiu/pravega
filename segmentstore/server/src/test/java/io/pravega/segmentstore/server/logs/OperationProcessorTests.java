@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,6 +43,8 @@ import io.pravega.segmentstore.storage.QueueStats;
 import io.pravega.segmentstore.storage.Storage;
 import io.pravega.segmentstore.storage.cache.CacheStorage;
 import io.pravega.segmentstore.storage.cache.DirectMemoryCache;
+import io.pravega.segmentstore.storage.ThrottleSourceListener;
+import io.pravega.segmentstore.storage.WriteSettings;
 import io.pravega.segmentstore.storage.mocks.InMemoryStorageFactory;
 import io.pravega.test.common.AssertExtensions;
 import io.pravega.test.common.ErrorInjector;
@@ -654,8 +656,8 @@ public class OperationProcessorTests extends OperationLogTestBase {
         }
 
         @Override
-        public int getMaxAppendLength() {
-            return 1024 * 1024;
+        public WriteSettings getWriteSettings() {
+            return new WriteSettings(1024 * 1024, Duration.ofMinutes(1), Integer.MAX_VALUE);
         }
 
         @Override
@@ -666,6 +668,11 @@ public class OperationProcessorTests extends OperationLogTestBase {
         @Override
         public QueueStats getQueueStatistics() {
             return QueueStats.DEFAULT;
+        }
+
+        @Override
+        public void registerQueueStateChangeListener(ThrottleSourceListener listener) {
+
         }
 
         @Override

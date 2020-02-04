@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ import io.pravega.shared.protocol.netty.WireCommands.SetupAppend;
 import io.pravega.shared.protocol.netty.WireCommands.WrongHost;
 import java.nio.ByteBuffer;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -69,11 +70,14 @@ class ConditionalOutputStreamImpl implements ConditionalOutputStream {
                         if (client == null || client.isClosed()) {
                             client = new RawClient(controller, connectionFactory, segmentId);
                             long requestId = client.getFlow().getNextSequenceNumber();
-                            log.debug("Setting up append on segment: {}", segmentId);
-                            SetupAppend setup = new SetupAppend(requestId, writerId,
-                                                                segmentId.getScopedName(),
-                                                                tokenProvider.retrieveToken());
-                            val reply = client.sendRequest(requestId, setup);
+                            log.debug("Setting up appends on segment {} for ConditionalOutputStream.", segmentId);
+
+                            CompletableFuture<Reply> reply = tokenProvider.retrieveToken().thenCompose(token -> {
+                                SetupAppend setup = new SetupAppend(requestId, writerId,
+                                        segmentId.getScopedName(), token);
+                                return client.sendRequest(requestId, setup);
+                            });
+
                             AppendSetup appendSetup = transformAppendSetup(reply.join());
                             if (appendSetup.getLastEventNumber() >= appendSequence) {
                                 return true;

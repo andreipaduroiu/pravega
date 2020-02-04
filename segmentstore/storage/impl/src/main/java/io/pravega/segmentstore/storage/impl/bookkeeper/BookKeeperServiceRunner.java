@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,12 +45,12 @@ public class BookKeeperServiceRunner implements AutoCloseable {
     public static final String PROPERTY_BASE_PORT = "basePort";
     public static final String PROPERTY_BOOKIE_COUNT = "bookieCount";
     public static final String PROPERTY_ZK_PORT = "zkPort";
-    public static final String PROPERTY_ZK_LEDGERS_PATH = "zkLedgersPath";
+    public static final String PROPERTY_LEDGERS_PATH = "zkLedgersPath"; // ZK namespace path for ledger metadata.
     public static final String PROPERTY_START_ZK = "startZk";
     public static final String PROPERTY_SECURE_BK = "secureBk";
     public static final String TLS_KEY_STORE_PASSWD = "tlsKeyStorePasswd";
     public static final String TLS_KEY_STORE = "tlsKeyStore";
-    public static final String PROPERTY_LEDGERS_DIR = "ledgersDir";
+    public static final String PROPERTY_LEDGERS_DIR = "ledgersDir"; // File System path to store ledger data.
 
     private static final InetAddress LOOPBACK_ADDRESS = InetAddress.getLoopbackAddress();
     private final boolean startZk;
@@ -227,8 +227,7 @@ public class BookKeeperServiceRunner implements AutoCloseable {
         conf.setJournalDirName(journalDir.getPath());
         conf.setLedgerDirNames(new String[]{ledgerDir.getPath()});
         conf.setAllowLoopback(true);
-        conf.setJournalAdaptiveGroupWrites(false);
-        //conf.setFlushIntervalInBytes(32 * 1024 * 1024);
+        conf.setJournalAdaptiveGroupWrites(true);
 
         if (secureBK) {
             conf.setTLSProvider("OpenSSL");
@@ -287,7 +286,7 @@ public class BookKeeperServiceRunner implements AutoCloseable {
 
             b.bookiePorts(bkPorts);
             b.zkPort(Integer.parseInt(System.getProperty(PROPERTY_ZK_PORT)));
-            b.ledgersPath(System.getProperty(PROPERTY_ZK_LEDGERS_PATH));
+            b.ledgersPath(System.getProperty(PROPERTY_LEDGERS_PATH));
             b.startZk(Boolean.parseBoolean(System.getProperty(PROPERTY_START_ZK, "false")));
             b.tLSKeyStore(System.getProperty(TLS_KEY_STORE, "../../../config/bookie.keystore.jks"));
             b.tLSKeyStorePasswordPath(System.getProperty(TLS_KEY_STORE_PASSWD, "../../../config/bookie.keystore.jks.passwd"));
@@ -297,7 +296,7 @@ public class BookKeeperServiceRunner implements AutoCloseable {
         } catch (Exception ex) {
             System.out.println(String.format("Invalid or missing arguments (via system properties). Expected: %s(int), " +
                             "%s(int), %s(int), %s(String). (%s).", PROPERTY_BASE_PORT, PROPERTY_BOOKIE_COUNT, PROPERTY_ZK_PORT,
-                    PROPERTY_ZK_LEDGERS_PATH, ex.getMessage()));
+                    PROPERTY_LEDGERS_PATH, ex.getMessage()));
             System.exit(-1);
             return;
         }

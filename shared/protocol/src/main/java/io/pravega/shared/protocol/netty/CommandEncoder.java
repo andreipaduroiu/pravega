@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -10,24 +10,24 @@
 package io.pravega.shared.protocol.netty;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufOutputStream;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.handler.codec.MessageToByteEncoder;
 import io.pravega.shared.metrics.MetricNotifier;
 import io.pravega.shared.protocol.netty.WireCommands.AppendBlock;
 import io.pravega.shared.protocol.netty.WireCommands.AppendBlockEnd;
-import io.pravega.shared.protocol.netty.WireCommands.Padding;
+import io.pravega.shared.protocol.netty.WireCommands.Hello;
 import io.pravega.shared.protocol.netty.WireCommands.PartialEvent;
 import io.pravega.shared.protocol.netty.WireCommands.SetupAppend;
 import java.io.IOException;
 import java.util.AbstractMap.SimpleImmutableEntry;
-import java.util.UUID;
-import java.util.Map;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.ArrayList;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
@@ -36,10 +36,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
+import static io.pravega.shared.NameUtils.segmentTags;
 import static io.pravega.shared.metrics.ClientMetricKeys.CLIENT_APPEND_BLOCK_SIZE;
 import static io.pravega.shared.protocol.netty.WireCommands.TYPE_PLUS_LENGTH_SIZE;
 import static io.pravega.shared.protocol.netty.WireCommands.TYPE_SIZE;
-import static io.pravega.shared.segment.StreamSegmentNameUtils.segmentTags;
 
 /**
  * Encodes data so that it can go out onto the wire.
@@ -77,7 +77,7 @@ import static io.pravega.shared.segment.StreamSegmentNameUtils.segmentTags;
 @NotThreadSafe
 @RequiredArgsConstructor
 @Slf4j
-public class CommandEncoder extends MessageToByteEncoder<Object> {
+public class CommandEncoder extends FlushingMessageToByteEncoder<Object> {
     private static final byte[] LENGTH_PLACEHOLDER = new byte[4];
     private final Function<Long, AppendBatchSizeTracker> appendTracker;
     private final MetricNotifier metricNotifier;
@@ -212,6 +212,7 @@ public class CommandEncoder extends MessageToByteEncoder<Object> {
                     continueAppend(data, out);
                     if (bytesLeftInBlock == 0) {
                         completeAppend(null, out);
+                        flushRequired();
                     }
                 } else {
                     session.record(append);
@@ -227,6 +228,7 @@ public class CommandEncoder extends MessageToByteEncoder<Object> {
                         ByteBuf dataInsideBlock = data.readSlice(bytesLeftInBlock);
                         completeAppend(dataInsideBlock, data, out);
                         flushAll(out);
+                        flushRequired();
                     }
                 } else {
                       session.write(data, out);
@@ -239,16 +241,23 @@ public class CommandEncoder extends MessageToByteEncoder<Object> {
             SetupAppend setup = (SetupAppend) msg;
             setupSegments.put(new SimpleImmutableEntry<>(setup.getSegment(), setup.getWriterId()),
                               new Session(setup.getWriterId(), setup.getRequestId()));
+            flushRequired();
         } else if (msg instanceof BlockTimeout) {
             BlockTimeout timeoutMsg = (BlockTimeout) msg;
             if (tokenCounter.get() == timeoutMsg.token) {
                 breakCurrentAppend(out);
                 flushAll(out);
             }
+            flushRequired();
+        } else if (msg instanceof Hello) {
+            Preconditions.checkState(isChannelFree());
+            Preconditions.checkState(pendingWrites.isEmpty());
+            writeMessage((WireCommand) msg, out);
         } else if (msg instanceof WireCommand) {
             breakCurrentAppend(out);
             flushAll(out);
             writeMessage((WireCommand) msg, out);
+            flushRequired();
         } else {
             throw new IllegalArgumentException("Expected a wire command and found: " + msg);
         }
@@ -378,8 +387,14 @@ public class CommandEncoder extends MessageToByteEncoder<Object> {
         if (isChannelFree()) {
             return;
         }
-        writeMessage(new Padding(bytesLeftInBlock), out);
+        writePadding(out);
         completeAppend(null, out);
+    }
+    
+    private void writePadding(ByteBuf out) {
+        out.writeInt(WireCommandType.PADDING.getCode());
+        out.writeInt(bytesLeftInBlock);
+        out.writeZero(bytesLeftInBlock);
     }
 
     @SneakyThrows(IOException.class)

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -60,7 +60,7 @@ public class TransactionalEventStreamWriterImpl<Type> implements TransactionalEv
         this.outputStreamFactory = Preconditions.checkNotNull(outputStreamFactory);
         this.serializer = Preconditions.checkNotNull(serializer);
         this.config = config;
-        this.pinger = new Pinger(config, stream, controller, executor);
+        this.pinger = new Pinger(config.getTransactionTimeoutTime(), stream, controller, executor);
     }
 
     @RequiredArgsConstructor

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,6 +43,7 @@ public class ExtendedS3IntegrationTest extends BookKeeperIntegrationTestBase {
     /**
      * Starts BookKeeper.
      */
+    @Override
     @Before
     public void setUp() throws Exception {
         super.setUp();
@@ -56,6 +57,7 @@ public class ExtendedS3IntegrationTest extends BookKeeperIntegrationTestBase {
                 .with(ExtendedS3StorageConfig.URI, endpoint));
     }
 
+    @Override
     @After
     public void tearDown() throws Exception {
         super.tearDown();

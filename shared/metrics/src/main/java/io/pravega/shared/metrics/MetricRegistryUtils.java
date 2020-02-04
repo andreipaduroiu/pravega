@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,9 @@ import io.micrometer.core.instrument.DistributionSummary;
 
 import lombok.extern.slf4j.Slf4j;
 
+/**
+ * Utility class to access metrics stored in the local cache of the metrics registry.
+ */
 @Slf4j
 public class MetricRegistryUtils {
 

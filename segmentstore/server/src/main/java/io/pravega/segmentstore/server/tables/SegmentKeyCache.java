@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -448,7 +448,7 @@ class SegmentKeyCache {
 
         /**
          * Removes the contents of this entry from the cache, if anything was stored there in the first place. Invoking
-         * this will cause {@link #storeInCache} to throw an {@link IllegalStateException} going forward.
+         * this method will cause {@link #storeInCache} to throw an {@link IllegalStateException} going forward.
          *
          * @return True if there was anything evicted, false otherwise.
          */
@@ -463,8 +463,7 @@ class SegmentKeyCache {
             return false;
         }
 
-        @GuardedBy("this")
-        private byte[] getFromCache() {
+        private synchronized byte[] getFromCache() {
             BufferView data = null;
             if (this.cacheAddress >= 0) {
                 data = SegmentKeyCache.this.cacheStorage.get(this.cacheAddress);

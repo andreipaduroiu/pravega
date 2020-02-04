@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,9 @@ import io.pravega.segmentstore.storage.DurableDataLog;
 import io.pravega.segmentstore.storage.DurableDataLogException;
 import io.pravega.segmentstore.storage.LogAddress;
 import io.pravega.segmentstore.storage.QueueStats;
+import io.pravega.segmentstore.storage.ThrottleSourceListener;
+import io.pravega.segmentstore.storage.WriteSettings;
+import io.pravega.segmentstore.storage.WriteTooLongException;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.time.Duration;
@@ -120,8 +123,8 @@ class InMemoryDurableDataLog implements DurableDataLog {
     }
 
     @Override
-    public int getMaxAppendLength() {
-        return this.entries.getMaxAppendSize();
+    public WriteSettings getWriteSettings() {
+        return new WriteSettings(this.entries.getMaxAppendSize(), Duration.ofMinutes(1), Integer.MAX_VALUE);
     }
 
     @Override
@@ -139,8 +142,17 @@ class InMemoryDurableDataLog implements DurableDataLog {
     }
 
     @Override
+    public void registerQueueStateChangeListener(ThrottleSourceListener listener) {
+        // No-op (because getQueueStatistics() doesn't return anything interesting).
+    }
+
+    @Override
     public CompletableFuture<LogAddress> append(ArrayView data, Duration timeout) {
         ensurePreconditions();
+        if (data.getLength() > getWriteSettings().getMaxWriteLength()) {
+            return Futures.failedFuture(new WriteTooLongException(data.getLength(), getWriteSettings().getMaxWriteLength()));
+        }
+
         CompletableFuture<LogAddress> result;
         try {
             Entry entry = new Entry(data);

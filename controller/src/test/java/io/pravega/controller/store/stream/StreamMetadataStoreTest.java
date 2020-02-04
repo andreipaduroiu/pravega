@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,9 @@ import io.pravega.controller.store.stream.records.ActiveTxnRecord;
 import io.pravega.controller.store.stream.records.CommittingTransactionsRecord;
 import io.pravega.controller.store.stream.records.EpochRecord;
 import io.pravega.controller.store.stream.records.EpochTransitionRecord;
+import io.pravega.controller.store.stream.records.HistoryTimeSeries;
 import io.pravega.controller.store.stream.records.RecordHelper;
+import io.pravega.controller.store.stream.records.SealedSegmentsMapShard;
 import io.pravega.controller.store.stream.records.StreamConfigurationRecord;
 import io.pravega.controller.store.stream.records.StreamCutRecord;
 import io.pravega.controller.store.stream.records.StreamSegmentRecord;
@@ -30,7 +32,7 @@ import io.pravega.controller.store.stream.records.StreamTruncationRecord;
 import io.pravega.controller.store.stream.records.WriterMark;
 import io.pravega.controller.store.task.TxnResource;
 import io.pravega.controller.stream.api.grpc.v1.Controller.DeleteScopeStatus;
-import io.pravega.shared.segment.StreamSegmentNameUtils;
+import io.pravega.shared.NameUtils;
 import io.pravega.test.common.AssertExtensions;
 import org.apache.commons.lang3.tuple.Pair;
 import org.junit.After;
@@ -39,6 +41,8 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.Timeout;
+
+import static io.pravega.shared.NameUtils.computeSegmentId;
 
 import java.time.Duration;
 import java.util.AbstractMap;
@@ -61,7 +65,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import static io.pravega.shared.segment.StreamSegmentNameUtils.computeSegmentId;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
@@ -420,6 +423,12 @@ public abstract class StreamMetadataStoreTest {
         store.createStream(scope, stream, configuration, start, null, executor).get();
         store.setState(scope, stream, State.ACTIVE, null, executor).get();
 
+        // set minimum number of segments to 1 so that we can also test scale downs
+        StreamConfiguration config = StreamConfiguration.builder().scalingPolicy(ScalingPolicy.fixed(1)).build();
+        store.startUpdateConfiguration(scope, stream, config, null, executor).join();
+        VersionedMetadata<StreamConfigurationRecord> configRecord = store.getConfigurationRecord(scope, stream, null, executor).join();
+        store.completeUpdateConfiguration(scope, stream, configRecord, null, executor).join();
+
         // region idempotent
 
         long scaleTs = System.currentTimeMillis();
@@ -570,6 +579,11 @@ public abstract class StreamMetadataStoreTest {
 
         store.createStream(scope, stream, configuration, start, null, executor).get();
         store.setState(scope, stream, State.ACTIVE, null, executor).get();
+        // set minimum number of segments to 1
+        StreamConfiguration config = StreamConfiguration.builder().scalingPolicy(ScalingPolicy.fixed(1)).build();
+        store.startUpdateConfiguration(scope, stream, config, null, executor).join();
+        VersionedMetadata<StreamConfigurationRecord> configRecord = store.getConfigurationRecord(scope, stream, null, executor).join();
+        store.completeUpdateConfiguration(scope, stream, configRecord, null, executor).join();
 
         // region concurrent start scale
         // Test scenario where one request starts and completes as the other is waiting on StartScale.createEpochTransition
@@ -1209,7 +1223,7 @@ public abstract class StreamMetadataStoreTest {
         Random random = new Random();
         for (int i = 0; i < 100; i++) {
             int epoch = random.nextInt(10);
-            valid.put(StreamSegmentNameUtils.computeSegmentId(epoch * 100 + i, epoch), 0L);
+            valid.put(NameUtils.computeSegmentId(epoch * 100 + i, epoch), 0L);
         }
         
         assertTrue(store.isStreamCutValid(scope, stream, valid, null, executor).join());
@@ -1539,5 +1553,66 @@ public abstract class StreamMetadataStoreTest {
         assertEquals(mark.getPosition().size(), 1);
         assertTrue(mark.getPosition().containsKey(0L));
         assertEquals(mark.getPosition().get(0L).longValue(), 1L);
+    }
+    
+    @Test
+    public void testHistoryTimeSeriesChunk() throws Exception {
+        String scope = "history";
+        String stream = "history";
+        createAndScaleStream(store, scope, stream, 2);
+        HistoryTimeSeries chunk = store.getHistoryTimeSeriesChunk(scope, stream, 0, null, executor).join();
+        assertEquals(chunk.getLatestRecord().getEpoch(), 2);
+    }
+    
+    @Test
+    public void testSealedSegmentSizeMapShard() throws Exception {
+        String scope = "sealedMap";
+        String stream = "sealedMap";
+        createAndScaleStream(store, scope, stream, 2);
+        SealedSegmentsMapShard shard = store.getSealedSegmentSizeMapShard(scope, stream, 0, null, executor).join();
+        assertEquals(shard.getSize(NameUtils.computeSegmentId(0, 0)).longValue(), 0L);
+        assertEquals(shard.getSize(NameUtils.computeSegmentId(1, 1)).longValue(), 1L);
+        assertNull(shard.getSize(NameUtils.computeSegmentId(2, 2)));
+    }
+    
+    @Test
+    public void testSegmentSealedEpoch() throws Exception {
+        String scope = "sealedMap";
+        String stream = "sealedMap";
+        createAndScaleStream(store, scope, stream, 2);
+        long segmentId = NameUtils.computeSegmentId(0, 0);
+        int epoch = store.getSegmentSealedEpoch(scope, stream, segmentId, null, executor).join();
+        assertEquals(epoch, 1);
+        segmentId = NameUtils.computeSegmentId(1, 1);
+        epoch = store.getSegmentSealedEpoch(scope, stream, segmentId, null, executor).join();
+        assertEquals(epoch, 2);
+        segmentId = NameUtils.computeSegmentId(2, 2);
+        epoch = store.getSegmentSealedEpoch(scope, stream, segmentId, null, executor).join();
+        assertEquals(epoch, -1);
+    }
+    
+    private void createAndScaleStream(StreamMetadataStore store, String scope, String stream, int times) {
+        long time = System.currentTimeMillis();
+        store.createScope(scope).join();
+        store.createStream(scope, stream, StreamConfiguration.builder().scalingPolicy(ScalingPolicy.fixed(1))
+                                                             .build(), time, null, executor).join();
+        VersionedMetadata<State> state = store.getVersionedState(scope, stream, null, executor).join();
+        store.updateVersionedState(scope, stream, State.ACTIVE, state, null, executor).join();
+
+        for (int i = 0; i < times; i++) {
+            long scaleTs = time + i;
+            List<Long> sealedSegments = Collections.singletonList(NameUtils.computeSegmentId(i, i));
+            VersionedMetadata<EpochTransitionRecord> etr = store.submitScale(scope, stream, sealedSegments,
+                    Collections.singletonList(new SimpleEntry<>(0.0, 1.0)), scaleTs, null, null, executor).join();
+            state = store.getVersionedState(scope, stream, null, executor).join();
+            state = store.updateVersionedState(scope, stream, State.SCALING, state, null, executor).join();
+            etr = store.startScale(scope, stream, false, etr, state, null, executor).join();
+            store.scaleCreateNewEpochs(scope, stream, etr, null, executor).join();
+            long size = i;
+            store.scaleSegmentsSealed(scope, stream, sealedSegments.stream().collect(Collectors.toMap(x -> x, x -> size)), etr,
+                    null, executor).join();
+            store.completeScale(scope, stream, etr, null, executor).join();
+            store.setState(scope, stream, State.ACTIVE, null, executor).join();
+        }
     }
 }

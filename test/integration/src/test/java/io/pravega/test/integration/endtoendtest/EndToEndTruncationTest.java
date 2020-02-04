@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -9,7 +9,7 @@
  */
 package io.pravega.test.integration.endtoendtest;
 
-import static io.pravega.shared.segment.StreamSegmentNameUtils.computeSegmentId;
+import static io.pravega.shared.NameUtils.computeSegmentId;
 import static io.pravega.test.common.AssertExtensions.assertFutureThrows;
 import static io.pravega.test.common.AssertExtensions.assertThrows;
 import static io.pravega.test.integration.ReadWriteUtils.readEvents;
@@ -261,6 +261,12 @@ public class EndToEndTruncationTest {
         LocalController controller = (LocalController) controllerWrapper.getController();
         controllerWrapper.getControllerService().createScope("test").get();
         controller.createStream("test", "test", config).get();
+        
+        config = StreamConfiguration.builder()
+                                    .scalingPolicy(ScalingPolicy.byEventRate(10, 2, 1))
+                                    .build();
+        controller.updateStream("test", "test", config).get();
+
         @Cleanup
         ConnectionFactory connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder()
                 .controllerURI(URI.create("tcp://" + serviceHost))
@@ -326,6 +332,11 @@ public class EndToEndTruncationTest {
         LocalController controller = (LocalController) controllerWrapper.getController();
         controllerWrapper.getControllerService().createScope("test").get();
         controller.createStream("test", "test", config).get();
+        config = StreamConfiguration.builder()
+                                    .scalingPolicy(ScalingPolicy.byEventRate(10, 2, 1))
+                                    .build();
+        controller.updateStream("test", "test", config).get();
+
         @Cleanup
         ConnectionFactory connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder()
                                                                                     .controllerURI(URI.create("tcp://" + serviceHost))

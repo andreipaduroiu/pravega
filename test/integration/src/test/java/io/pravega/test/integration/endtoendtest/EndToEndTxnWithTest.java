@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -209,10 +209,12 @@ public class EndToEndTxnWithTest extends ThreadPooledTestSuite {
         EventWriterConfig validConfig = EventWriterConfig.builder().transactionTimeoutTime(10000).build();
         assertNotNull(createTxn(clientFactory, validConfig, "test"));
 
-        EventWriterConfig lowTimeoutConfig = EventWriterConfig.builder().transactionTimeoutTime(1000).build();
         AssertExtensions.assertThrows("low timeout period not honoured",
-                () -> createTxn(clientFactory, lowTimeoutConfig, "test"),
-                e -> Exceptions.unwrap(e.getCause()) instanceof IllegalArgumentException);
+                () -> {
+                    EventWriterConfig lowTimeoutConfig = EventWriterConfig.builder().transactionTimeoutTime(1000).build();
+                    createTxn(clientFactory, lowTimeoutConfig, "test");
+                },
+                e -> Exceptions.unwrap(e) instanceof IllegalArgumentException);
 
         EventWriterConfig highTimeoutConfig = EventWriterConfig.builder().transactionTimeoutTime(200 * 1000).build();
         AssertExtensions.assertThrows("high timeouot period not honoured",

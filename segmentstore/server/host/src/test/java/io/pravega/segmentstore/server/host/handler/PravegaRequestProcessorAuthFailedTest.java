@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -9,7 +9,7 @@
  */
 package io.pravega.segmentstore.server.host.handler;
 
-import io.pravega.auth.TokenException;
+import io.pravega.auth.InvalidTokenException;
 import io.pravega.segmentstore.contracts.StreamSegmentStore;
 import io.pravega.segmentstore.contracts.tables.TableStore;
 import io.pravega.segmentstore.server.host.stat.SegmentStatsRecorder;
@@ -35,7 +35,7 @@ public class PravegaRequestProcessorAuthFailedTest {
         processor = new PravegaRequestProcessor(store, mock(TableStore.class), connection, SegmentStatsRecorder.noOp(),
                 TableSegmentStatsRecorder.noOp(),
                 (resource, token, expectedLevel) -> {
-                    throw new TokenException("Token verification failed.");
+                    throw new InvalidTokenException("Token verification failed.");
                 }, false);
     }
 

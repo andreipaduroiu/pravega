@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,9 +13,10 @@ import com.google.common.collect.Iterators;
 import io.pravega.common.ObjectClosedException;
 import io.pravega.common.hash.RandomFactory;
 import io.pravega.common.util.ByteArraySegment;
-import io.pravega.segmentstore.storage.cache.CacheSnapshot;
+import io.pravega.segmentstore.storage.cache.CacheState;
 import io.pravega.segmentstore.storage.cache.DirectMemoryCache;
 import io.pravega.segmentstore.storage.cache.NoOpCache;
+import io.pravega.segmentstore.storage.ThrottleSourceListener;
 import io.pravega.test.common.AssertExtensions;
 import io.pravega.test.common.ThreadPooledTestSuite;
 import java.time.Duration;
@@ -329,7 +330,7 @@ public class CacheManagerTests extends ThreadPooledTestSuite {
         final CachePolicy policy = new CachePolicy(1024, Duration.ofHours(1), Duration.ofHours(1));
         @Cleanup
         val cache = new DirectMemoryCache(policy.getMaxSize());
-        int maxCacheSize = (int) cache.getSnapshot().getMaxBytes();
+        int maxCacheSize = (int) cache.getState().getMaxBytes();
 
         @Cleanup
         TestCacheManager cm = new TestCacheManager(policy, cache, executorService());
@@ -356,7 +357,7 @@ public class CacheManagerTests extends ThreadPooledTestSuite {
         // Verify we were asked to cleanup.
         Assert.assertEquals("Unexpected number of cleanup requests.", 1, cleanupRequestCount.get());
         Assert.assertEquals("New entry was not inserted.", length2, cache.get(write2).getLength());
-        Assert.assertEquals("Unexpected number of stored bytes.", length2, cache.getSnapshot().getStoredBytes());
+        Assert.assertEquals("Unexpected number of stored bytes.", length2, cache.getState().getStoredBytes());
     }
 
     /**
@@ -368,7 +369,7 @@ public class CacheManagerTests extends ThreadPooledTestSuite {
         final CachePolicy policy = new CachePolicy(1024, Duration.ofHours(1), Duration.ofHours(1));
         @Cleanup
         val cache = new DirectMemoryCache(policy.getMaxSize());
-        int maxCacheSize = (int) cache.getSnapshot().getMaxBytes();
+        int maxCacheSize = (int) cache.getState().getMaxBytes();
 
         @Cleanup
         TestCacheManager cm = new TestCacheManager(policy, cache, executorService());
@@ -436,7 +437,7 @@ public class CacheManagerTests extends ThreadPooledTestSuite {
     }
 
     /**
-     * Tests the ability to register, invoke and auto-unregister {@link CacheUtilizationProvider.CleanupListener} instances.
+     * Tests the ability to register, invoke and auto-unregister {@link ThrottleSourceListener} instances.
      */
     @Test
     public void testCleanupListeners() {
@@ -449,8 +450,8 @@ public class CacheManagerTests extends ThreadPooledTestSuite {
         cm.register(client);
         TestCleanupListener l1 = new TestCleanupListener();
         TestCleanupListener l2 = new TestCleanupListener();
-        cm.registerCleanupListener(l1);
-        cm.registerCleanupListener(l2);
+        cm.getUtilizationProvider().registerCleanupListener(l1);
+        cm.getUtilizationProvider().registerCleanupListener(l2);
         client.setUpdateGenerationsImpl((current, oldest) -> true); // We always remove something.
 
         // In the first iteration, we should invoke both listeners.
@@ -466,9 +467,10 @@ public class CacheManagerTests extends ThreadPooledTestSuite {
         cm.runOneIteration();
         Assert.assertEquals("Expected cleanup listener to be invoked the second time.", 2, l1.getCallCount());
         Assert.assertEquals("Not expecting cleanup listener to be invoked the second time for closed listener.", 1, l2.getCallCount());
+        cm.getUtilizationProvider().registerCleanupListener(l2); // This should have no effect.
     }
 
-    private static class TestCleanupListener implements CacheUtilizationProvider.CleanupListener {
+    private static class TestCleanupListener implements ThrottleSourceListener {
         @Getter
         private int callCount = 0;
         @Setter
@@ -476,7 +478,7 @@ public class CacheManagerTests extends ThreadPooledTestSuite {
         private boolean closed;
 
         @Override
-        public void cacheCleanupComplete() {
+        public void notifyThrottleSourceChanged() {
             this.callCount++;
         }
     }
@@ -520,9 +522,9 @@ public class CacheManagerTests extends ThreadPooledTestSuite {
         private final long maxBytes;
 
         @Override
-        public CacheSnapshot getSnapshot() {
-            val s = super.getSnapshot();
-            return new CacheSnapshot(this.storedBytes, this.usedBytes, 0, 0, this.maxBytes);
+        public CacheState getState() {
+            val s = super.getState();
+            return new CacheState(this.storedBytes, this.usedBytes, 0, 0, this.maxBytes);
         }
     }
 }

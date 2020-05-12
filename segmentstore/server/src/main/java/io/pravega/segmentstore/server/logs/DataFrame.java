@@ -25,6 +25,7 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedList;
+import java.util.List;
 import javax.annotation.concurrent.NotThreadSafe;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -43,7 +44,7 @@ class DataFrame {
     private static final byte CURRENT_VERSION = 0;
     private final int maxSize;
     private final CompositeByteArrayOutputStream sharedDataBuffer;
-    private final LinkedList<WriteEntry> entries;
+    private final List<BufferView> entries;
 
     /**
      * The Frame Address within its serialization chain.
@@ -75,7 +76,8 @@ class DataFrame {
         this.maxSize = maxSize;
         this.data = null;
         this.entries = new LinkedList<>();
-        this.sharedDataBuffer = new CompositeByteArrayOutputStream(maxSize, 1024);
+        this.entries.add(null); // We'll add it later.
+        this.sharedDataBuffer = new CompositeByteArrayOutputStream(maxSize, 4096);
         this.openEntry = null;
         this.length = FrameHeader.SERIALIZATION_LENGTH;
     }
@@ -98,7 +100,7 @@ class DataFrame {
      * Gets a value indicating whether the DataFrame is empty (if it has no entries).
      */
     boolean isEmpty() {
-        return this.entries.isEmpty();
+        return this.entries.size() == 1;
     }
 
     /**
@@ -161,7 +163,11 @@ class DataFrame {
             int entryLength = this.openEntry.getLength();
             assert entryLength >= 0 : "entryLength is negative.";
             this.openEntry.setLastRecordEntry(endOfRecord);
-            this.entries.addLast(this.openEntry);
+
+            EntryHeader entryHeader = new EntryHeader(this.openEntry.getLength(), this.openEntry.isFirstRecordEntry(), this.openEntry.isLastRecordEntry());
+            this.entries.add(entryHeader.serialize(this.sharedDataBuffer));
+            this.openEntry.getComponents().forEachRemaining(this.entries::add);
+
             this.length += entryLength + EntryHeader.HEADER_SIZE;
             this.openEntry = null;
         }
@@ -210,23 +216,9 @@ class DataFrame {
 
         // Compile the DataFrame contents.
         Preconditions.checkState(this.openEntry == null, "An open entry exists. Any open entries must be closed prior to sealing.");
-        ArrayList<Iterator<BufferView>> result = new ArrayList<>(1 + this.entries.size() * 2);
-
-        // Serialize Frame Header.
         FrameHeader header = new FrameHeader(getLength() - FrameHeader.SERIALIZATION_LENGTH);
-        result.add(Iterators.singletonIterator(header.serialize(this.sharedDataBuffer)));
-
-        // Stitch the result together.
-        for (WriteEntry e : this.entries) {
-            // Serialize Entry Header.
-            EntryHeader entryHeader = new EntryHeader(e.getLength(), e.isFirstRecordEntry(), e.isLastRecordEntry());
-            result.add(Iterators.singletonIterator(entryHeader.serialize(this.sharedDataBuffer)));
-
-            // Add the entry's components.
-            result.add(e.getComponents());
-        }
-
-        this.data = BufferView.wrap(Iterators.concat(result.iterator()));
+        this.entries.set(0, header.serialize(this.sharedDataBuffer));
+        this.data = BufferView.wrap(this.entries);
     }
 
     /**
@@ -397,7 +389,7 @@ class DataFrame {
     private static class WriteEntry {
         private final int maxLength;
         private final CompositeByteArrayOutputStream sharedBuffer;
-        private final LinkedList<Component> components = new LinkedList<>();
+        private final List<Component> components = new ArrayList<>();
         @Getter
         private int length;
         /**
@@ -441,7 +433,7 @@ class DataFrame {
                 if (copy) {
                     b.copyTo(getByteSequence().data);
                 } else {
-                    this.components.addLast(new BufferViewReference(b));
+                    this.components.add(new BufferViewReference(b));
                 }
                 this.length += actualLength;
             }
@@ -455,12 +447,13 @@ class DataFrame {
         }
 
         private ByteSequence getByteSequence() {
-            Component c = this.components.peekLast();
+            int size = this.components.size();
+            Component c = size == 0 ? null : this.components.get(size - 1);
             if (c instanceof ByteSequence) {
                 return (ByteSequence) c;
             } else {
                 ByteSequence s = new ByteSequence(this.sharedBuffer.slice());
-                this.components.addLast(s);
+                this.components.add(s);
                 return s;
             }
         }

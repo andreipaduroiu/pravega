@@ -24,7 +24,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.Objects;
-import java.util.function.Consumer;
 import java.util.concurrent.atomic.AtomicInteger;
 import lombok.Getter;
 import lombok.NonNull;
@@ -313,24 +312,6 @@ public class CompositeByteArraySegment extends AbstractBufferView implements Com
     }
 
     //endregion
-
-    /**
-     * Defines a collector function that can be applied to a range of an array.
-     *
-     * @param <ExceptionT> Type of exception that this function can throw.
-     */
-    @FunctionalInterface
-    interface Collector<ExceptionT extends Exception> {
-        /**
-         * Processes an array range.
-         *
-         * @param array       The array.
-         * @param arrayOffset The start offset within the array.
-         * @param length      The number of bytes, beginning at startOffset, that need to be processed.
-         * @throws ExceptionT (Optional) Any exception to throw.
-         */
-        void accept(byte[] array, int arrayOffset, int length) throws ExceptionT;
-    }
 
     //region Reader
 

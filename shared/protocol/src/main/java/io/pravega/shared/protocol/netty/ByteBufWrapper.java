@@ -21,10 +21,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.List;
-import java.util.function.Consumer;
 import java.util.Iterator;
 import javax.annotation.concurrent.NotThreadSafe;
 import lombok.NonNull;
@@ -97,22 +93,6 @@ public class ByteBufWrapper extends AbstractBufferView implements BufferView {
             return Iterators.singletonIterator(bb.nioBuffer());
         }
         return Iterators.forArray(bb.nioBuffers());
-    }
-
-    @Override
-    public void collect(Consumer<ByteBuffer> collectBuffer) {
-        collectInternal(this.buf.duplicate(), collectBuffer);
-    }
-
-    private void collectInternal(ByteBuf buf, Consumer<ByteBuffer> collectBuffer) {
-        if (buf instanceof CompositeByteBuf) {
-            Iterator<ByteBuf> i = ((CompositeByteBuf) buf).iterator();
-            while (i.hasNext()) {
-                collectInternal(i.next(), collectBuffer);
-            }
-        } else {
-            collectBuffer.accept(buf.nioBuffer());
-        }
     }
 
     @Override
@@ -209,6 +189,17 @@ public class ByteBufWrapper extends AbstractBufferView implements BufferView {
                 this.buf.readBytes(segment.array(), segment.arrayOffset(), len);
             }
             return len;
+        }
+
+        @Override
+        public BufferView readBytes(int maxLength) {
+            int len = Math.min(maxLength, this.buf.readableBytes());
+            if (len > 0) {
+                ByteArraySegment b = new ByteArraySegment(new byte[len]);
+                readBytes(b);
+                return b;
+            }
+            return BufferView.empty();
         }
 
         @Override

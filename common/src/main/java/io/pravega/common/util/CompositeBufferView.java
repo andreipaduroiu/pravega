@@ -20,7 +20,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-import java.util.function.Consumer;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NonNull;
@@ -149,13 +148,6 @@ class CompositeBufferView extends AbstractBufferView implements BufferView {
     @Override
     public Iterator<ByteBuffer> iterateBuffers() {
         return Iterators.concat(Iterators.transform(this.components.iterator(), BufferView::iterateBuffers));
-    }
-
-    @Override
-    public void collect(Consumer<ByteBuffer> collectBuffer) {
-        for (BufferView c : this.components) {
-            c.collect(collectBuffer);
-        }
     }
 
     @Override

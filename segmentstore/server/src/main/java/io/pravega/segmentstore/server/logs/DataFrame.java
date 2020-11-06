@@ -37,7 +37,7 @@ import lombok.SneakyThrows;
  * across multiple frames.
  */
 @NotThreadSafe
-class DataFrame {
+public class DataFrame {
     //region Members
 
     static final int MIN_ENTRY_LENGTH_NEEDED = EntryHeader.HEADER_SIZE + 1;

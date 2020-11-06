@@ -429,7 +429,7 @@ public class DataFrame {
         int append(BufferView.Reader data, boolean copy) {
             int actualLength = Math.min(data.available(), getAvailableLength());
             if (actualLength > 0) {
-                BufferView b = data.readBytes(actualLength);
+                BufferView b = data.readSlice(actualLength);
                 if (copy) {
                     b.copyTo(getByteSequence().data);
                 } else {

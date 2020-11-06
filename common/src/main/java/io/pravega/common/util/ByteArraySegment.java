@@ -361,14 +361,6 @@ public class ByteArraySegment extends AbstractBufferView implements ArrayView {
                 throw new OutOfBoundsException();
             }
         }
-
-        @Override
-        public BufferView readBytes(int maxLength) {
-            int len = Math.min(available(), maxLength);
-            ByteArraySegment result = slice(this.position, len);
-            this.position += len;
-            return result;
-        }
     }
 
     //endregion

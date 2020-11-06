@@ -388,14 +388,6 @@ public class CompositeByteArraySegment extends AbstractBufferView implements Com
                 throw new OutOfBoundsException();
             }
         }
-
-        @Override
-        public BufferView readBytes(int maxLength) {
-            int len = Math.min(available(), maxLength);
-            BufferView result = slice(this.position, len);
-            this.position += len;
-            return result;
-        }
     }
 
     //endregion

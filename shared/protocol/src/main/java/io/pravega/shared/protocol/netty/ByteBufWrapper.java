@@ -192,17 +192,6 @@ public class ByteBufWrapper extends AbstractBufferView implements BufferView {
         }
 
         @Override
-        public BufferView readBytes(int maxLength) {
-            int len = Math.min(maxLength, this.buf.readableBytes());
-            if (len > 0) {
-                ByteArraySegment b = new ByteArraySegment(new byte[len]);
-                readBytes(b);
-                return b;
-            }
-            return BufferView.empty();
-        }
-
-        @Override
         public byte readByte() {
             try {
                 return this.buf.readByte();

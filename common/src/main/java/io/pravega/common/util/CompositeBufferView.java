@@ -257,11 +257,6 @@ class CompositeBufferView extends AbstractBufferView implements BufferView {
             return new CompositeBufferView(components, length);
         }
 
-        @Override
-        public BufferView readBytes(int maxLength) {
-            throw new UnsupportedOperationException();
-        }
-
         private BufferView.Reader getCurrent() {
             if (this.current == null || this.current.available() == 0) {
                 this.current = this.readers.hasNext() ? this.readers.next() : null;

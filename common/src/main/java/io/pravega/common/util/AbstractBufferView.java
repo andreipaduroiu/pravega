@@ -224,11 +224,6 @@ public abstract class AbstractBufferView implements BufferView {
             }
 
             @Override
-            public BufferView readBytes(int maxLength) {
-                return BufferView.empty();
-            }
-
-            @Override
             public byte readByte() {
                 throw new OutOfBoundsException("Cannot read from Empty BufferView.");
             }

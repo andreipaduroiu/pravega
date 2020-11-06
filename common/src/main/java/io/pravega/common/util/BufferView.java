@@ -234,8 +234,6 @@ public interface BufferView {
          */
         int readBytes(ByteArraySegment segment);
 
-        BufferView readBytes(int maxLength);
-
         /**
          * Reads one byte and advances the reader position by 1.
          *

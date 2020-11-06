@@ -9,13 +9,17 @@
  */
 package io.pravega.test.integration.controller.server;
 
+import com.google.common.collect.ImmutableMap;
 import io.pravega.client.segment.impl.Segment;
 import io.pravega.client.stream.ScalingPolicy;
 import io.pravega.client.stream.Stream;
 import io.pravega.client.stream.StreamConfiguration;
-import io.pravega.client.stream.impl.Controller;
+import io.pravega.client.control.impl.Controller;
 import io.pravega.client.stream.impl.StreamImpl;
+import io.pravega.client.stream.StreamCut;
 import io.pravega.client.stream.impl.StreamSegments;
+import io.pravega.client.stream.impl.StreamCutImpl;
+import io.pravega.client.tables.KeyValueTableConfiguration;
 import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.controller.store.stream.StoreException;
@@ -28,7 +32,9 @@ import io.pravega.test.common.AssertExtensions;
 import io.pravega.test.common.TestUtils;
 import io.pravega.test.common.TestingServerStarter;
 import io.pravega.test.integration.demo.ControllerWrapper;
+
 import java.util.Map;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
@@ -38,6 +44,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import static io.pravega.test.common.AssertExtensions.assertThrows;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -62,7 +69,7 @@ public class ControllerServiceTest {
         StreamSegmentStore store = serviceBuilder.createStreamSegmentService();
         TableStore tableStore = serviceBuilder.createTableStoreService();
 
-        server = new PravegaConnectionListener(false, servicePort, store, tableStore);
+        server = new PravegaConnectionListener(false, servicePort, store, tableStore, serviceBuilder.getLowPriorityExecutor());
         server.startListening();
         
         controllerWrapper = new ControllerWrapper(zkTestServer.getConnectString(), false,
@@ -125,7 +132,7 @@ public class ControllerServiceTest {
     }
     
     
-    @Test(timeout = 40000)
+    @Test(timeout = 80000)
     public void testControllerService() throws Exception {
         final String scope1 = "scope1";
         final String scope2 = "scope2";
@@ -151,6 +158,22 @@ public class ControllerServiceTest {
         createAStream(scope2, streamName1, controller, config2);
         //Different name in same scope
         createAStream(scope1, streamName2, controller, config3);
+
+        final String kvtName1 = "kvtable1";
+        final String kvtName2 = "kvtable2";
+        final String kvtZero = "kvtableZero";
+        final KeyValueTableConfiguration kvtConfig1 = KeyValueTableConfiguration.builder()
+                .partitionCount(2).build();
+        final KeyValueTableConfiguration kvtConfigZeroPC = KeyValueTableConfiguration.builder()
+                .partitionCount(0).build();
+
+        createAKeyValueTable(scope1, kvtName1, controller, kvtConfig1);
+        //Same name in different scope
+        createAKeyValueTable(scope2, kvtName1, controller, kvtConfig1);
+        //Different name in different scope
+        createAKeyValueTable(scope2, kvtName2, controller, kvtConfig1);
+        //KVTable with 0 partitions should fail
+        createAKeyValueTableZeroPC(scope2, kvtZero, controller, kvtConfigZeroPC);
         
         final String scopeSeal = "scopeSeal";
         final String streamNameSeal = "streamSeal";
@@ -192,6 +215,9 @@ public class ControllerServiceTest {
         getSegmentsBeforeCreation(controller, scope1, streamName1);
 
         getSegmentsAfterCreation(controller, scope1, streamName1);
+
+        addRemoveSubscribersTest(controller, scope1, streamName2);
+        updateSubscriberStreamCutTest(controller, scope1, streamName1);
     }
 
     private static void getSegmentsAfterCreation(Controller controller, final String scope,
@@ -283,6 +309,60 @@ public class ControllerServiceTest {
                                                                              .build())));
     }
 
+    private static void addRemoveSubscribersTest(Controller controller, final String scope, final String stream) throws InterruptedException, ExecutionException {
+        // add the first subscriber
+        final String subscriber1 = "subscriber1";
+        assertTrue(controller.addSubscriber(scope, stream, subscriber1).get());
+
+        // add one more new subscriber
+        final String subscriber2 = "subscriber2";
+        assertTrue(controller.addSubscriber(scope, stream, subscriber2).get());
+
+        List<String> subscribers = controller.listSubscribers(scope, stream).get();
+        assertTrue(subscribers.size() == 2);
+        assertTrue(subscribers.contains(subscriber1));
+        assertTrue(subscribers.contains(subscriber2));
+
+        assertTrue(controller.deleteSubscriber(scope, stream, subscriber2).get());
+        List<String> subscribersNow = controller.listSubscribers(scope, stream).get();
+        assertTrue(subscribersNow.size() == 1);
+        assertTrue(subscribersNow.contains(subscriber1));
+        assertFalse(subscribersNow.contains(subscriber2));
+
+        // and now add again...
+        assertTrue(controller.addSubscriber(scope, stream, subscriber2).get());
+        List<String> subscribersAgain = controller.listSubscribers(scope, stream).get();
+        assertTrue(subscribersAgain.size() == 2);
+        assertTrue(subscribersAgain.contains(subscriber1));
+        assertTrue(subscribersAgain.contains(subscriber2));
+
+        // add more new subscribers
+        final String subscriber3 = "subscriber3";
+        assertTrue(controller.addSubscriber(scope, stream, subscriber3).get());
+        List<String> subscribersMore = controller.listSubscribers(scope, stream).get();
+        assertTrue(subscribersMore.size() == 3);
+        assertTrue(subscribersMore.contains(subscriber1));
+        assertTrue(subscribersMore.contains(subscriber2));
+        assertTrue(subscribersMore.contains(subscriber3));
+    }
+
+    private static void updateSubscriberStreamCutTest(Controller controller, final String scope, final String stream) throws InterruptedException, ExecutionException {
+        // add the first subscriber
+        final String subscriber = "up_subscriber";
+        assertTrue(controller.addSubscriber(scope, stream, subscriber).get());
+
+        Stream streamToBeUpdated = Stream.of(scope, stream);
+        Segment seg1 = new Segment(scope, stream, 0L);
+        Segment seg2 = new Segment(scope, stream, 1L);
+        ImmutableMap<Segment, Long> streamCutPositions = ImmutableMap.of(seg1, 1L, seg2, 11L);
+        StreamCut streamCut = new StreamCutImpl(streamToBeUpdated, streamCutPositions);
+        assertTrue(controller.updateSubscriberStreamCut(scope, stream, subscriber, streamCut).get());
+
+        ImmutableMap<Segment, Long> streamCutPositionsNew = ImmutableMap.of(seg1, 2L, seg2, 22L);
+        StreamCut streamCutNew = new StreamCutImpl(streamToBeUpdated, streamCutPositionsNew);
+        assertTrue(controller.updateSubscriberStreamCut(scope, stream, subscriber, streamCutNew).get());
+    }
+
     private static void sealAStream(ControllerWrapper controllerWrapper, Controller controller,
                                    final ScalingPolicy scalingPolicy, final String scopeSeal,
                                    final String streamNameSeal) throws InterruptedException, ExecutionException {
@@ -325,6 +405,17 @@ public class ControllerServiceTest {
         StreamSegments currentSegs = controller.getCurrentSegments(scopeSeal, streamNameSeal).get();
         assertTrue("FAILURE: No active segments should be present in a sealed stream", currentSegs.getSegments().isEmpty());
         
+    }
+
+    private static void createAKeyValueTable(String scope, String kvtName, Controller controller,
+                                      final KeyValueTableConfiguration config) throws InterruptedException,
+            ExecutionException {
+        assertTrue(controller.createKeyValueTable(scope, kvtName, config).get());
+    }
+
+    private static void createAKeyValueTableZeroPC(String scope, String kvtName, Controller controller,
+                                             final KeyValueTableConfiguration config) {
+        assertThrows(IllegalArgumentException.class, () -> controller.createKeyValueTable(scope, kvtName, config).join());
     }
 
 }

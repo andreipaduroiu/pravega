@@ -11,12 +11,14 @@ package io.pravega.test.system;
 
 import io.pravega.client.ClientConfig;
 import io.pravega.client.EventStreamClientFactory;
-import io.pravega.client.SynchronizerClientFactory;
 import io.pravega.client.admin.ReaderGroupManager;
 import io.pravega.client.admin.StreamManager;
 import io.pravega.client.admin.impl.ReaderGroupManagerImpl;
-import io.pravega.client.netty.impl.ConnectionFactory;
-import io.pravega.client.netty.impl.ConnectionFactoryImpl;
+import io.pravega.client.connection.impl.ConnectionFactory;
+import io.pravega.client.connection.impl.SocketConnectionFactoryImpl;
+import io.pravega.client.control.impl.Controller;
+import io.pravega.client.control.impl.ControllerImpl;
+import io.pravega.client.control.impl.ControllerImplConfig;
 import io.pravega.client.segment.impl.Segment;
 import io.pravega.client.state.Revision;
 import io.pravega.client.state.RevisionedStreamClient;
@@ -32,16 +34,12 @@ import io.pravega.client.stream.Stream;
 import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.client.stream.StreamCut;
 import io.pravega.client.stream.TimeWindow;
-import io.pravega.client.stream.impl.Controller;
-import io.pravega.client.stream.impl.ControllerImpl;
-import io.pravega.client.stream.impl.ControllerImplConfig;
+import io.pravega.client.stream.impl.ClientFactoryImpl;
 import io.pravega.client.stream.impl.JavaSerializer;
 import io.pravega.client.stream.impl.StreamCutImpl;
 import io.pravega.client.watermark.WatermarkSerializer;
-import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.common.hash.RandomFactory;
-import io.pravega.controller.store.stream.StoreException;
 import io.pravega.shared.NameUtils;
 import io.pravega.shared.watermarks.Watermark;
 import io.pravega.test.common.AssertExtensions;
@@ -49,16 +47,6 @@ import io.pravega.test.system.framework.Environment;
 import io.pravega.test.system.framework.SystemTestRunner;
 import io.pravega.test.system.framework.Utils;
 import io.pravega.test.system.framework.services.Service;
-import lombok.Cleanup;
-import lombok.extern.slf4j.Slf4j;
-import mesosphere.marathon.client.MarathonException;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.Timeout;
-import org.junit.runner.RunWith;
-
 import java.net.URI;
 import java.time.Duration;
 import java.util.Collections;
@@ -75,6 +63,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
+import lombok.Cleanup;
+import lombok.extern.slf4j.Slf4j;
+import mesosphere.marathon.client.MarathonException;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.Timeout;
+import org.junit.runner.RunWith;
 
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -130,7 +127,7 @@ public class WatermarkingTest extends AbstractSystemTest {
     public void watermarkingTests() throws Exception {
         final ClientConfig clientConfig = Utils.buildClientConfig(controllerURI);
         @Cleanup
-        ConnectionFactory connectionFactory = new ConnectionFactoryImpl(clientConfig);
+        ConnectionFactory connectionFactory = new SocketConnectionFactoryImpl(clientConfig);
         ControllerImpl controller = new ControllerImpl(ControllerImplConfig.builder().clientConfig(clientConfig).build(),
                                                        connectionFactory.getInternalExecutor());
         
@@ -154,17 +151,13 @@ public class WatermarkingTest extends AbstractSystemTest {
         Stream streamObj = Stream.of(SCOPE, STREAM);
         scale(controller, streamObj);
 
-        // wait until mark stream is created
-        AtomicBoolean markStreamCreated = new AtomicBoolean(false);
-        Futures.loop(() -> !markStreamCreated.get(), 
-                () -> Futures.exceptionallyExpecting(controller.getCurrentSegments(SCOPE, NameUtils.getMarkStreamForStream(STREAM)), 
-                    e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, null)
-                .thenAccept(v -> markStreamCreated.set(v != null)), executorService);
-
         @Cleanup
-        SynchronizerClientFactory syncClientFactory = SynchronizerClientFactory.withScope(SCOPE, clientConfig);
+        ClientFactoryImpl syncClientFactory = new ClientFactoryImpl(SCOPE,
+                new ControllerImpl(ControllerImplConfig.builder().clientConfig(clientConfig).build(),
+                        connectionFactory.getInternalExecutor()),
+                connectionFactory);
         String markStream = NameUtils.getMarkStreamForStream(STREAM);
-
+        
         RevisionedStreamClient<Watermark> watermarkReader = syncClientFactory.createRevisionedStreamClient(markStream,
                 new WatermarkSerializer(),
                 SynchronizerConfig.builder().build());
@@ -217,7 +210,7 @@ public class WatermarkingTest extends AbstractSystemTest {
         Map<Stream, StreamCut> end = Collections.singletonMap(streamObj, streamCutEnd);
 
         @Cleanup
-        ReaderGroupManager readerGroupManager = new ReaderGroupManagerImpl(SCOPE, controller, syncClientFactory, connectionFactory);
+        ReaderGroupManager readerGroupManager = new ReaderGroupManagerImpl(SCOPE, controller, syncClientFactory);
         String readerGroup = "rg";
 
         readerGroupManager.createReaderGroup(readerGroup, ReaderGroupConfig.builder().stream(streamObj)

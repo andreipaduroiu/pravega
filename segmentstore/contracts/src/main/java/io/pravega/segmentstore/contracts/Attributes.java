@@ -25,6 +25,16 @@ import java.util.stream.Collectors;
  */
 public class Attributes {
     /**
+     * When used as an Attribute Value for a Boolean-like attribute, indicates a value equivalent to {@link Boolean#TRUE}.
+     */
+    public static final long BOOLEAN_TRUE = 1L;
+
+    /**
+     * When used as an Attribute Value for a Boolean-like attribute, indicates a value equivalent to {@link Boolean#FALSE}.
+     */
+    public static final long BOOLEAN_FALSE = 0L;
+
+    /**
      * The Attribute ID at which Table Attributes can begin at. Everything with an ID smaller than this is a general
      * Attribute.
      */
@@ -87,6 +97,22 @@ public class Attributes {
      * the Attribute Index.
      */
     public static final UUID ATTRIBUTE_SEGMENT_PERSIST_SEQ_NO = new UUID(CORE_ATTRIBUTE_ID_PREFIX, 8);
+
+    /**
+     * Defines an attribute that is used to store the Segment's Type ({@link SegmentType#getValue()}.
+     * This attribute cannot be modified once set on the Segment.
+     */
+    public static final UUID ATTRIBUTE_SEGMENT_TYPE = new UUID(CORE_ATTRIBUTE_ID_PREFIX, 9);
+
+    /**
+     * Determines whether the given attribute cannot be modified once originally set on the Segment.
+     *
+     * @param attributeId The Attribute Id to check.
+     * @return True if immutable, false otherwise.
+     */
+    public static boolean isUnmodifiable(UUID attributeId) {
+        return attributeId == ATTRIBUTE_SEGMENT_TYPE;
+    }
 
     /**
      * Determines whether the given Attribute Id refers to a Core Attribute.

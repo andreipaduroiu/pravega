@@ -10,6 +10,7 @@
 package io.pravega.common.util;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Iterators;
 import io.pravega.common.Exceptions;
 import io.pravega.common.io.FixedByteArrayOutputStream;
 import java.io.ByteArrayInputStream;
@@ -17,13 +18,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.util.Iterator;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 /**
  * Allows segmenting a byte array and operating only on that segment.
  */
-public class ByteArraySegment implements ArrayView {
+public class ByteArraySegment extends AbstractBufferView implements ArrayView {
     //region Members
 
     private final byte[] array;
@@ -169,6 +171,29 @@ public class ByteArraySegment implements ArrayView {
         stream.write(this.array, this.startOffset, this.length);
     }
 
+    @Override
+    public boolean equals(BufferView other) {
+        if (this.length != other.getLength()) {
+            return false;
+        } else if (other instanceof ArrayView) {
+            // ByteBuffer-optimized equality check.
+            return this.asByteBuffer().equals(((ArrayView) other).asByteBuffer());
+        }
+
+        // No good optimization available; default to AbstractBufferView.equals().
+        return super.equals(other);
+    }
+
+    @Override
+    public <ExceptionT extends Exception> void collect(Collector<ExceptionT> bufferCollector) throws ExceptionT {
+        bufferCollector.accept(ByteBuffer.wrap(this.array, this.startOffset, this.length));
+    }
+
+    @Override
+    public Iterator<ByteBuffer> iterateBuffers() {
+        return Iterators.singletonIterator(ByteBuffer.wrap(this.array, this.startOffset, this.length));
+    }
+
     //endregion
 
     //region Operations
@@ -276,7 +301,7 @@ public class ByteArraySegment implements ArrayView {
 
     //region Reader
 
-    private class Reader implements BufferView.Reader {
+    private class Reader extends AbstractReader implements BufferView.Reader {
         private int position = 0;
 
         @Override
@@ -290,6 +315,51 @@ public class ByteArraySegment implements ArrayView {
             System.arraycopy(array(), arrayOffset() + this.position, segment.array(), segment.arrayOffset(), len);
             this.position += len;
             return len;
+        }
+
+        @Override
+        public byte readByte() {
+            if (position >= ByteArraySegment.this.length) {
+                throw new OutOfBoundsException();
+            }
+
+            byte result = ByteArraySegment.this.array[ByteArraySegment.this.startOffset + this.position];
+            this.position++;
+            return result;
+        }
+
+        @Override
+        public int readInt() {
+            int nextPos = this.position + Integer.BYTES;
+            if (nextPos > ByteArraySegment.this.length) {
+                throw new OutOfBoundsException();
+            }
+            int r = BitConverter.readInt(ByteArraySegment.this.array, ByteArraySegment.this.startOffset + this.position);
+            this.position = nextPos;
+            return r;
+        }
+
+        @Override
+        public long readLong() {
+            int nextPos = this.position + Long.BYTES;
+            if (nextPos > ByteArraySegment.this.length) {
+                throw new OutOfBoundsException();
+            }
+
+            long r = BitConverter.readLong(ByteArraySegment.this.array, ByteArraySegment.this.startOffset + this.position);
+            this.position = nextPos;
+            return r;
+        }
+
+        @Override
+        public BufferView readSlice(int length) {
+            try {
+                BufferView result = ByteArraySegment.this.slice(this.position, length);
+                this.position += length;
+                return result;
+            } catch (IndexOutOfBoundsException ex) {
+                throw new OutOfBoundsException();
+            }
         }
 
         @Override

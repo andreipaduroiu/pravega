@@ -21,9 +21,11 @@ import java.io.SequenceInputStream;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.Objects;
 import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicInteger;
 import lombok.Getter;
 import lombok.NonNull;
 
@@ -32,7 +34,7 @@ import lombok.NonNull;
  * component array maps to a contiguous offset range and is only allocated when the first index within its range needs
  * to be set (if unallocated, any index within its range will have a value of 0).
  */
-public class CompositeByteArraySegment implements CompositeArrayView {
+public class CompositeByteArraySegment extends AbstractBufferView implements CompositeArrayView {
     //region Members
     /**
      * Default component array size. 4KB maps to the kernel's page size.
@@ -151,11 +153,11 @@ public class CompositeByteArraySegment implements CompositeArrayView {
     }
 
     @Override
-    public void collect(Consumer<ByteBuffer> collectBuffer) {
-        collect((array, arrayOffset, arrayLength) -> collectBuffer.accept(ByteBuffer.wrap(array, arrayOffset, arrayLength)), this.length);
+    public <ExceptionT extends Exception> void collect(Collector<ExceptionT> bufferCollector) throws ExceptionT {
+        collect((array, offset, len) -> bufferCollector.accept(ByteBuffer.wrap(array, offset, len)), this.length);
     }
 
-    private <ExceptionT extends Exception> void collect(Collector<ExceptionT> collectArray, int length) throws ExceptionT {
+    private <ExceptionT extends Exception> void collect(ArrayCollector<ExceptionT> collectArray, int length) throws ExceptionT {
         if (length == 0) {
             // Nothing to collect.
             return;
@@ -185,6 +187,36 @@ public class CompositeByteArraySegment implements CompositeArrayView {
     }
 
     @Override
+    public Iterator<ByteBuffer> iterateBuffers() {
+        if (this.length == 0) {
+            return Collections.emptyIterator();
+        }
+
+        AtomicInteger arrayOffset = new AtomicInteger(getArrayOffset(0));
+        AtomicInteger length = new AtomicInteger(this.length);
+        return Arrays.stream(this.arrays, getArrayId(0), getArrayId(this.length - 1) + 1)
+                .map(o -> {
+                    int arrayLength = Math.min(length.get(), this.arraySize - arrayOffset.get());
+                    byte[] b;
+                    if (o == null) {
+                        b = new byte[arrayLength];
+                    } else {
+                        b = (byte[]) o;
+                    }
+                    ByteBuffer bb = ByteBuffer.wrap(b, arrayOffset.get(), arrayLength);
+                    arrayOffset.set(0);
+                    length.addAndGet(-arrayLength);
+                    return bb;
+                })
+                .iterator();
+    }
+
+    @Override
+    public int getComponentCount() {
+        return this.length == 0 ? 0 : (this.startOffset + this.length - 1) / this.arraySize - this.startOffset / this.arraySize + 1;
+    }
+
+    @Override
     public byte[] getCopy() {
         byte[] result = new byte[this.length];
         copyTo(ByteBuffer.wrap(result));
@@ -198,13 +230,17 @@ public class CompositeByteArraySegment implements CompositeArrayView {
 
         int arrayOffset = getArrayOffset(targetOffset);
         int arrayId = getArrayId(targetOffset);
+        final int ol = length;
         while (length > 0) {
             byte[] array = getArray(arrayId, true); // Need to allocate if not already allocated.
             int copyLength = Math.min(array.length - arrayOffset, length);
             copyLength = source.readBytes(new ByteArraySegment(array, arrayOffset, copyLength));
             length -= copyLength;
-            arrayId++;
-            arrayOffset = 0;
+            arrayOffset += copyLength;
+            if (arrayOffset >= array.length) {
+                arrayId++;
+                arrayOffset = 0;
+            }
         }
     }
 
@@ -218,13 +254,6 @@ public class CompositeByteArraySegment implements CompositeArrayView {
         int length = Math.min(this.length, target.remaining());
         collect(target::put, length);
         return length;
-    }
-
-    @Override
-    public List<ByteBuffer> getContents() {
-        ArrayList<ByteBuffer> result = new ArrayList<>();
-        collect(result::add);
-        return result;
     }
 
     //endregion
@@ -305,7 +334,7 @@ public class CompositeByteArraySegment implements CompositeArrayView {
 
     //region Reader
 
-    private class CompositeReader implements BufferView.Reader {
+    private class CompositeReader extends AbstractReader implements BufferView.Reader {
         private int position = 0;
 
         @Override
@@ -324,6 +353,62 @@ public class CompositeByteArraySegment implements CompositeArrayView {
         }
 
         @Override
+        public byte readByte() {
+            try {
+                return get(this.position++);
+            } catch (IndexOutOfBoundsException ex) {
+                throw new OutOfBoundsException();
+            }
+        }
+
+        @Override
+        public int readInt() {
+            int arrayPos = getArrayOffset(this.position);
+            if (CompositeByteArraySegment.this.arraySize - arrayPos >= Integer.BYTES) {
+                int nextPos = this.position + Integer.BYTES;
+                if (nextPos > length) {
+                    throw new OutOfBoundsException();
+                }
+
+                byte[] array = getArray(getArrayId(this.position), false);
+                int r = array == null ? 0 : BitConverter.readInt(array, arrayPos);
+                this.position = nextPos;
+                return r;
+            }
+
+            return super.readInt();
+        }
+
+        @Override
+        public long readLong() {
+            int arrayPos = getArrayOffset(this.position);
+            if (CompositeByteArraySegment.this.arraySize - arrayPos >= Long.BYTES) {
+                int nextPos = this.position + Long.BYTES;
+                if (nextPos > length) {
+                    throw new OutOfBoundsException();
+                }
+
+                byte[] array = getArray(getArrayId(this.position), false);
+                long r = array == null ? 0 : BitConverter.readLong(array, arrayPos);
+                this.position = nextPos;
+                return r;
+            }
+
+            return super.readLong();
+        }
+
+        @Override
+        public BufferView readSlice(int length) {
+            try {
+                BufferView result = slice(this.position, length);
+                this.position += length;
+                return result;
+            } catch (IndexOutOfBoundsException ex) {
+                throw new OutOfBoundsException();
+            }
+        }
+
+        @Override
         public BufferView readBytes(int maxLength) {
             int len = Math.min(available(), maxLength);
             BufferView result = slice(this.position, len);
@@ -333,4 +418,17 @@ public class CompositeByteArraySegment implements CompositeArrayView {
     }
 
     //endregion
+
+    @FunctionalInterface
+    private interface ArrayCollector<ExceptionT extends Exception> {
+        /**
+         * Processes an array range.
+         *
+         * @param array       The array.
+         * @param arrayOffset The start offset within the array.
+         * @param length      The number of bytes, beginning at startOffset, that need to be processed.
+         * @throws ExceptionT (Optional) Any exception to throw.
+         */
+        void accept(byte[] array, int arrayOffset, int length) throws ExceptionT;
+    }
 }

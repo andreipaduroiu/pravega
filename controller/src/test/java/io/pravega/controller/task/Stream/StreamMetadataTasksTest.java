@@ -12,7 +12,8 @@ package io.pravega.controller.task.Stream;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import io.pravega.client.ClientConfig;
-import io.pravega.client.netty.impl.ConnectionFactoryImpl;
+import io.pravega.client.connection.impl.ConnectionFactory;
+import io.pravega.client.connection.impl.SocketConnectionFactoryImpl;
 import io.pravega.client.stream.EventStreamWriter;
 import io.pravega.client.stream.EventWriterConfig;
 import io.pravega.client.stream.RetentionPolicy;
@@ -25,6 +26,7 @@ import io.pravega.common.tracing.RequestTracker;
 import io.pravega.controller.metrics.StreamMetrics;
 import io.pravega.controller.metrics.TransactionMetrics;
 import io.pravega.controller.mocks.ControllerEventStreamWriterMock;
+import io.pravega.controller.mocks.EventHelperMock;
 import io.pravega.controller.mocks.EventStreamWriterMock;
 import io.pravega.controller.mocks.SegmentHelperMock;
 import io.pravega.controller.server.ControllerService;
@@ -37,10 +39,9 @@ import io.pravega.controller.server.eventProcessor.requesthandlers.StreamRequest
 import io.pravega.controller.server.eventProcessor.requesthandlers.TaskExceptions;
 import io.pravega.controller.server.eventProcessor.requesthandlers.TruncateStreamTask;
 import io.pravega.controller.server.eventProcessor.requesthandlers.UpdateStreamTask;
-import io.pravega.controller.server.rpc.auth.GrpcAuthHelper;
-import io.pravega.controller.store.host.HostControllerStore;
-import io.pravega.controller.store.host.HostStoreFactory;
-import io.pravega.controller.store.host.impl.HostMonitorConfigImpl;
+import io.pravega.controller.server.security.auth.GrpcAuthHelper;
+import io.pravega.controller.store.VersionedMetadata;
+import io.pravega.controller.store.kvtable.KVTableMetadataStore;
 import io.pravega.controller.store.stream.AbstractStreamMetadataStore;
 import io.pravega.controller.store.stream.BucketStore;
 import io.pravega.controller.store.stream.OperationContext;
@@ -50,7 +51,6 @@ import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamMetadataStoreTestHelper;
 import io.pravega.controller.store.stream.StreamStoreFactory;
 import io.pravega.controller.store.stream.TxnStatus;
-import io.pravega.controller.store.stream.VersionedMetadata;
 import io.pravega.controller.store.stream.VersionedTransactionData;
 import io.pravega.controller.store.stream.records.ActiveTxnRecord;
 import io.pravega.controller.store.stream.records.EpochTransitionRecord;
@@ -64,11 +64,17 @@ import io.pravega.controller.stream.api.grpc.v1.Controller;
 import io.pravega.controller.stream.api.grpc.v1.Controller.ScaleResponse;
 import io.pravega.controller.stream.api.grpc.v1.Controller.ScaleResponse.ScaleStreamStatus;
 import io.pravega.controller.stream.api.grpc.v1.Controller.UpdateStreamStatus;
+import io.pravega.controller.stream.api.grpc.v1.Controller.DeleteSubscriberStatus;
+import io.pravega.controller.stream.api.grpc.v1.Controller.AddSubscriberStatus;
+import io.pravega.controller.stream.api.grpc.v1.Controller.UpdateSubscriberStatus;
+import io.pravega.controller.task.EventHelper;
+import io.pravega.controller.task.KeyValueTable.TableMetadataTasks;
 import io.pravega.controller.util.Config;
 import io.pravega.shared.NameUtils;
 import io.pravega.shared.controller.event.AbortEvent;
 import io.pravega.shared.controller.event.CommitEvent;
 import io.pravega.shared.controller.event.ControllerEvent;
+import io.pravega.shared.controller.event.DeleteStreamEvent;
 import io.pravega.shared.controller.event.ScaleOpEvent;
 import io.pravega.shared.controller.event.SealStreamEvent;
 import io.pravega.shared.controller.event.TruncateStreamEvent;
@@ -92,11 +98,13 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import lombok.Data;
 import lombok.Getter;
+import org.apache.commons.lang3.NotImplementedException;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.ExponentialBackoffRetry;
@@ -104,6 +112,7 @@ import org.apache.curator.test.TestingServer;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.mockito.Mock;
 
 import static io.pravega.shared.NameUtils.computeSegmentId;
 import static org.junit.Assert.assertEquals;
@@ -138,11 +147,15 @@ public abstract class StreamMetadataTasksTest {
     private StreamMetadataTasks streamMetadataTasks;
     private StreamTransactionMetadataTasks streamTransactionMetadataTasks;
     private StreamRequestHandler streamRequestHandler;
-    private ConnectionFactoryImpl connectionFactory;
+    private ConnectionFactory connectionFactory;
 
     private RequestTracker requestTracker = new RequestTracker(true);
     private EventStreamWriterMock<CommitEvent> commitWriter;
     private EventStreamWriterMock<AbortEvent> abortWriter;
+    @Mock
+    private KVTableMetadataStore kvtStore;
+    @Mock
+    private TableMetadataTasks kvtMetadataTasks;
 
     @Before
     public void setup() throws Exception {
@@ -162,12 +175,11 @@ public abstract class StreamMetadataTasksTest {
         bucketStore = StreamStoreFactory.createInMemoryBucketStore(map);
         
         TaskMetadataStore taskMetadataStore = TaskStoreFactory.createZKStore(zkClient, executor);
-        HostControllerStore hostStore = HostStoreFactory.createInMemoryStore(HostMonitorConfigImpl.dummyConfig());
-
         SegmentHelper segmentHelperMock = SegmentHelperMock.getSegmentHelperMock();
-        connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder().build());
+        connectionFactory = new SocketConnectionFactoryImpl(ClientConfig.builder().build());
+        EventHelper helper = EventHelperMock.getEventHelperMock(executor, "host", ((AbstractStreamMetadataStore) streamStore).getHostTaskIndex());
         streamMetadataTasks = spy(new StreamMetadataTasks(streamStorePartialMock, bucketStore, taskMetadataStore, segmentHelperMock,
-                executor, "host", new GrpcAuthHelper(authEnabled, "key", 300), requestTracker));
+                executor, "host", new GrpcAuthHelper(authEnabled, "key", 300), requestTracker, helper));
 
         streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(
                 streamStorePartialMock, segmentHelperMock, executor, "host", 
@@ -181,7 +193,7 @@ public abstract class StreamMetadataTasksTest {
                 new TruncateStreamTask(streamMetadataTasks, streamStorePartialMock, executor),
                 streamStorePartialMock,
                 executor);
-        consumer = new ControllerService(streamStorePartialMock, bucketStore, streamMetadataTasks,
+        consumer = new ControllerService(kvtStore, kvtMetadataTasks, streamStorePartialMock, bucketStore, streamMetadataTasks,
                 streamTransactionMetadataTasks, segmentHelperMock, executor, null);
         commitWriter = new EventStreamWriterMock<>();
         abortWriter = new EventStreamWriterMock<>();
@@ -214,6 +226,7 @@ public abstract class StreamMetadataTasksTest {
     public void tearDown() throws Exception {
         streamMetadataTasks.close();
         streamTransactionMetadataTasks.close();
+        streamStorePartialMock.close();
         streamStorePartialMock.close();
         zkClient.close();
         zkServer.close();
@@ -308,6 +321,147 @@ public abstract class StreamMetadataTasksTest {
         // execute the event again. It should complete without doing anything. 
         updateStreamTask.execute(event).join();
         assertEquals(State.ACTIVE, streamStorePartialMock.getState(SCOPE, stream1, true, null, executor).join());
+    }
+
+    @Test(timeout = 30000)
+    public void addSubscriberTest() throws InterruptedException, ExecutionException {
+        // add a new subscriber - positive case
+        String subscriber1 = "subscriber1";
+        Controller.AddSubscriberStatus.Status addStatus = streamMetadataTasks.addSubscriber(SCOPE, stream1, subscriber1, null).get();
+        assertEquals(Controller.AddSubscriberStatus.Status.SUCCESS, addStatus);
+
+        List<String> allSubscribers = streamMetadataTasks.listSubscribers(SCOPE, stream1, null).get().getSubscribersList();
+        assertEquals(1, allSubscribers.size());
+
+        String subscriber2 = "subscriber2";
+        addStatus = streamMetadataTasks.addSubscriber(SCOPE, stream1, subscriber2, null).get();
+        assertEquals(Controller.AddSubscriberStatus.Status.SUCCESS, addStatus);
+
+        String subscriber3 = "subscriber3";
+        addStatus = streamMetadataTasks.addSubscriber(SCOPE, stream1, subscriber3, null).get();
+        assertEquals(Controller.AddSubscriberStatus.Status.SUCCESS, addStatus);
+
+        allSubscribers = streamMetadataTasks.listSubscribers(SCOPE, stream1, null).get().getSubscribersList();
+        assertEquals(3, allSubscribers.size());
+        assertTrue(allSubscribers.contains(subscriber1));
+        assertTrue(allSubscribers.contains(subscriber2));
+        assertTrue(allSubscribers.contains(subscriber3));
+
+        // Add subscriber with same name
+        addStatus = streamMetadataTasks.addSubscriber(SCOPE, stream1, subscriber2, null).get();
+        assertEquals(Controller.AddSubscriberStatus.Status.SUBSCRIBER_EXISTS, addStatus);
+
+        // Add subscriber when stream/scope does not exist
+        addStatus = streamMetadataTasks.addSubscriber(SCOPE, "nostream", "subscriber4", null).get();
+        assertEquals(Controller.AddSubscriberStatus.Status.STREAM_NOT_FOUND, addStatus);
+    }
+
+    @Test(timeout = 30000)
+    public void removeSubscriberTest() throws InterruptedException, ExecutionException {
+        // add a new subscriber - positive case
+        String subscriber1 = "subscriber1";
+        AddSubscriberStatus.Status addStatus = streamMetadataTasks.addSubscriber(SCOPE, stream1, subscriber1, null).get();
+        assertEquals(Controller.AddSubscriberStatus.Status.SUCCESS, addStatus);
+
+        String subscriber2 = "subscriber2";
+        addStatus = streamMetadataTasks.addSubscriber(SCOPE, stream1, subscriber2, null).get();
+        assertEquals(Controller.AddSubscriberStatus.Status.SUCCESS, addStatus);
+
+        String subscriber3 = "subscriber3";
+        addStatus = streamMetadataTasks.addSubscriber(SCOPE, stream1, subscriber3, null).get();
+        assertEquals(Controller.AddSubscriberStatus.Status.SUCCESS, addStatus);
+
+        List<String> allSubscribers = streamMetadataTasks.listSubscribers(SCOPE, stream1, null).get().getSubscribersList();
+        assertEquals(3, allSubscribers.size());
+        assertTrue(allSubscribers.contains(subscriber1));
+        assertTrue(allSubscribers.contains(subscriber2));
+        assertTrue(allSubscribers.contains(subscriber3));
+
+        // Remove subscriber
+        DeleteSubscriberStatus.Status removeStatus = streamMetadataTasks.deleteSubscriber(SCOPE, stream1, subscriber2, null).get();
+        assertEquals(DeleteSubscriberStatus.Status.SUCCESS, removeStatus);
+
+        // Remove subscriber from non-existing stream
+        removeStatus = streamMetadataTasks.deleteSubscriber(SCOPE, "nostream", subscriber2, null).get();
+        assertEquals(DeleteSubscriberStatus.Status.STREAM_NOT_FOUND, removeStatus);
+
+        // Remove non-existing subscriber from stream
+        removeStatus = streamMetadataTasks.deleteSubscriber(SCOPE, stream1, "subscriber4", null).get();
+        assertEquals(DeleteSubscriberStatus.Status.SUBSCRIBER_NOT_FOUND, removeStatus);
+    }
+
+    @Test(timeout = 30000)
+    public void getSubscribersForStreamTest() throws InterruptedException, ExecutionException {
+        // subscribers for non-existing stream
+        List<String> allSubscribers = streamMetadataTasks.listSubscribers(SCOPE, "stream2", null).get().getSubscribersList();
+        assertEquals(0, allSubscribers.size());
+
+        // no subscribers found for existing Stream
+        allSubscribers = streamMetadataTasks.listSubscribers(SCOPE, stream1, null).get().getSubscribersList();
+        assertEquals(0, allSubscribers.size());
+
+        // add a new subscribers - positive case
+        String subscriber1 = "subscriber1";
+        AddSubscriberStatus.Status addStatus = streamMetadataTasks.addSubscriber(SCOPE, stream1, subscriber1, null).get();
+        assertEquals(Controller.AddSubscriberStatus.Status.SUCCESS, addStatus);
+
+        String subscriber2 = "subscriber2";
+        addStatus = streamMetadataTasks.addSubscriber(SCOPE, stream1, subscriber2, null).get();
+        assertEquals(Controller.AddSubscriberStatus.Status.SUCCESS, addStatus);
+
+        String subscriber3 = "subscriber3";
+        addStatus = streamMetadataTasks.addSubscriber(SCOPE, stream1, subscriber3, null).get();
+        assertEquals(Controller.AddSubscriberStatus.Status.SUCCESS, addStatus);
+
+        allSubscribers = streamMetadataTasks.listSubscribers(SCOPE, stream1, null).get().getSubscribersList();
+        assertEquals(3, allSubscribers.size());
+        assertTrue(allSubscribers.contains(subscriber1));
+        assertTrue(allSubscribers.contains(subscriber2));
+        assertTrue(allSubscribers.contains(subscriber3));
+    }
+
+    @Test(timeout = 30000)
+    public void updateSubscriberStreamCutTest() throws InterruptedException, ExecutionException {
+        String subscriber1 = "subscriber1";
+        AddSubscriberStatus.Status addStatus = streamMetadataTasks.addSubscriber(SCOPE, stream1, subscriber1, null).get();
+        assertEquals(Controller.AddSubscriberStatus.Status.SUCCESS, addStatus);
+
+        String subscriber2 = "subscriber2";
+        addStatus = streamMetadataTasks.addSubscriber(SCOPE, stream1, subscriber2, null).get();
+        assertEquals(Controller.AddSubscriberStatus.Status.SUCCESS, addStatus);
+
+        List<String> allSubscribers = streamMetadataTasks.listSubscribers(SCOPE, stream1, null).get().getSubscribersList();
+        assertEquals(2, allSubscribers.size());
+        assertTrue(allSubscribers.contains(subscriber1));
+        assertTrue(allSubscribers.contains(subscriber2));
+
+        ImmutableMap<Long, Long> streamCut1 = ImmutableMap.of(0L, 10L, 1L, 10L);
+        UpdateSubscriberStatus.Status updateStatus = streamMetadataTasks.updateSubscriberStreamCut(SCOPE, stream1, subscriber1,
+                                                                                            streamCut1, null).get();
+        assertEquals(UpdateSubscriberStatus.Status.SUCCESS, updateStatus);
+
+        updateStatus = streamMetadataTasks.updateSubscriberStreamCut(SCOPE, stream1, subscriber2, streamCut1, null).get();
+        assertEquals(UpdateSubscriberStatus.Status.SUCCESS, updateStatus);
+
+        ImmutableMap<Long, Long> streamCut2 = ImmutableMap.of(0L, 20L, 1L, 30L);
+        updateStatus = streamMetadataTasks.updateSubscriberStreamCut(SCOPE, stream1, subscriber2, streamCut2, null).get();
+        assertEquals(UpdateSubscriberStatus.Status.SUCCESS, updateStatus);
+
+        ImmutableMap<Long, Long> streamCut3 = ImmutableMap.of(0L, 20L, 1L, 1L);
+        updateStatus = streamMetadataTasks.updateSubscriberStreamCut(SCOPE, stream1, subscriber2, streamCut3, null).get();
+        assertEquals(UpdateSubscriberStatus.Status.STREAMCUT_NOT_VALID, updateStatus);
+
+        ImmutableMap<Long, Long> streamCut4 = ImmutableMap.of(0L, 25L);
+        updateStatus = streamMetadataTasks.updateSubscriberStreamCut(SCOPE, stream1, subscriber2, streamCut4, null).get();
+        assertEquals(UpdateSubscriberStatus.Status.STREAMCUT_NOT_VALID, updateStatus);
+
+        // update non-existing stream
+        updateStatus = streamMetadataTasks.updateSubscriberStreamCut(SCOPE, "nostream", subscriber2, streamCut1, null).get();
+        assertEquals(UpdateSubscriberStatus.Status.STREAM_NOT_FOUND, updateStatus);
+
+        // update non-existing subscriber
+        updateStatus = streamMetadataTasks.updateSubscriberStreamCut(SCOPE, stream1, "nosubscriber", streamCut1, null).get();
+        assertEquals(UpdateSubscriberStatus.Status.SUBSCRIBER_NOT_FOUND, updateStatus);
     }
 
     @Test(timeout = 30000)
@@ -965,6 +1119,27 @@ public abstract class StreamMetadataTasksTest {
     }
 
     @Test(timeout = 30000)
+    public void sealStreamFailing() throws Exception {
+        WriterMock requestEventWriter = new WriterMock(streamMetadataTasks, executor);
+        streamMetadataTasks.setRequestEventWriter(requestEventWriter);
+
+        // attempt to seal a stream which is in creating state. This should fail and be retried. 
+        // now set the stream state to active. 
+        // it should be sealed.
+        String creating = "creating";
+        streamStorePartialMock.createStream(SCOPE, creating, StreamConfiguration.builder().scalingPolicy(ScalingPolicy.fixed(1)).build(),
+                System.currentTimeMillis(), null, executor).join();
+        UpdateStreamStatus.Status status = streamMetadataTasks.sealStream(SCOPE, creating, null, 1).join();
+        assertEquals(status, UpdateStreamStatus.Status.FAILURE);
+
+        streamStorePartialMock.setState(SCOPE, creating, State.ACTIVE, null, executor).join();
+        CompletableFuture<UpdateStreamStatus.Status> statusFuture = streamMetadataTasks.sealStream(SCOPE, creating, null, 1);
+        assertTrue(Futures.await(processEvent(requestEventWriter)));
+
+        assertEquals(UpdateStreamStatus.Status.SUCCESS, statusFuture.join());
+    }
+    
+    @Test(timeout = 30000)
     public void sealStreamWithTxnTest() throws Exception {
         WriterMock requestEventWriter = new WriterMock(streamMetadataTasks, executor);
         streamMetadataTasks.setRequestEventWriter(requestEventWriter);
@@ -1390,6 +1565,7 @@ public abstract class StreamMetadataTasksTest {
 
     @Test(timeout = 10000)
     public void testThrowSynchronousExceptionOnWriteEvent() {
+        @SuppressWarnings("unchecked")
         EventStreamWriter<ControllerEvent> requestEventWriter = mock(EventStreamWriter.class);
         doAnswer(x -> {
             throw new RuntimeException();
@@ -1471,6 +1647,7 @@ public abstract class StreamMetadataTasksTest {
         // being thrown.
         // For all subsequent times we will wait on waitOnLockFailed future.  
         doAnswer(x -> {
+            @SuppressWarnings("unchecked")
             CompletableFuture<Void> future = (CompletableFuture<Void>) x.callRealMethod();
             return future.exceptionally(e -> {
                 if (Exceptions.unwrap(e) instanceof LockFailedException) {
@@ -1503,6 +1680,69 @@ public abstract class StreamMetadataTasksTest {
         assertEquals(createStreamFuture2.join(), Controller.CreateStreamStatus.Status.STREAM_EXISTS);
     }
 
+    @Test(timeout = 30000)
+    public void testWorkflowCompletionTimeout() {
+        EventHelper helper = EventHelperMock.getEventHelperMock(executor, "host", ((AbstractStreamMetadataStore) streamStorePartialMock).getHostTaskIndex());
+
+        StreamMetadataTasks streamMetadataTask = new StreamMetadataTasks(streamStorePartialMock, bucketStore,
+                TaskStoreFactory.createZKStore(zkClient, executor),
+                SegmentHelperMock.getSegmentHelperMock(), executor, "host",
+                new GrpcAuthHelper(authEnabled, "key", 300), requestTracker, helper);
+        streamMetadataTask.setCompletionTimeoutMillis(500L);
+        StreamConfiguration configuration = StreamConfiguration.builder().scalingPolicy(ScalingPolicy.fixed(1)).build();
+
+        String completion = "completion";
+        streamStorePartialMock.createStream(SCOPE, completion, configuration, System.currentTimeMillis(), null, executor).join();
+        streamStorePartialMock.setState(SCOPE, completion, State.ACTIVE, null, executor).join();
+
+        WriterMock requestEventWriter = new WriterMock(streamMetadataTask, executor);
+        streamMetadataTask.setRequestEventWriter(requestEventWriter);
+        
+        StreamConfiguration configuration2 = StreamConfiguration.builder().scalingPolicy(ScalingPolicy.fixed(3)).build();
+
+        AssertExtensions.assertFutureThrows("update timedout", 
+                streamMetadataTask.updateStream(SCOPE, completion, configuration2, null),
+                e -> Exceptions.unwrap(e) instanceof TimeoutException);
+
+        ControllerEvent event = requestEventWriter.eventQueue.poll();
+        assertTrue(event instanceof UpdateStreamEvent);
+        VersionedMetadata<StreamConfigurationRecord> configurationRecord = streamStorePartialMock
+                .getConfigurationRecord(SCOPE, completion, null, executor).join();
+        assertTrue(configurationRecord.getObject().isUpdating());
+
+        Map<Long, Long> streamCut = Collections.singletonMap(0L, 0L);
+        AssertExtensions.assertFutureThrows("truncate timedout",
+                streamMetadataTask.truncateStream(SCOPE, completion, streamCut, null),
+                e -> Exceptions.unwrap(e) instanceof TimeoutException);
+
+        event = requestEventWriter.eventQueue.poll();
+        assertTrue(event instanceof TruncateStreamEvent);
+        
+        VersionedMetadata<StreamTruncationRecord> truncationRecord = streamStorePartialMock
+                .getTruncationRecord(SCOPE, completion, null, executor).join();
+        assertTrue(truncationRecord.getObject().isUpdating());
+
+        AssertExtensions.assertFutureThrows("seal timedout",
+                streamMetadataTask.sealStream(SCOPE, completion, null),
+                e -> Exceptions.unwrap(e) instanceof TimeoutException);
+
+        event = requestEventWriter.eventQueue.poll();
+        assertTrue(event instanceof SealStreamEvent);
+        
+        VersionedMetadata<State> state = streamStorePartialMock
+                .getVersionedState(SCOPE, completion, null, executor).join();
+        assertEquals(state.getObject(), State.SEALING);
+
+        streamStorePartialMock.setState(SCOPE, completion, State.SEALED, null, executor).join();
+
+        AssertExtensions.assertFutureThrows("delete timedout",
+                streamMetadataTask.deleteStream(SCOPE, completion, null),
+                e -> Exceptions.unwrap(e) instanceof TimeoutException);
+
+        event = requestEventWriter.eventQueue.poll();
+        assertTrue(event instanceof DeleteStreamEvent);
+    }
+    
     private CompletableFuture<Void> processEvent(WriterMock requestEventWriter) throws InterruptedException {
         ControllerEvent event;
         try {
@@ -1534,6 +1774,11 @@ public abstract class StreamMetadataTasksTest {
         @Override
         public CompletableFuture<Void> writeEvent(String routingKey, ControllerEvent event) {
             return writeEvent(event);
+        }
+
+        @Override
+        public CompletableFuture<Void> writeEvents(String routingKey, List<ControllerEvent> events) {
+            throw new NotImplementedException("mock doesnt require this");
         }
 
         @Override

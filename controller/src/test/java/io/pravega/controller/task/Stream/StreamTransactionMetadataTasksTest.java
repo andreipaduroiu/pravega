@@ -11,7 +11,7 @@ package io.pravega.controller.task.Stream;
 
 import io.pravega.client.EventStreamClientFactory;
 import io.pravega.client.admin.ReaderGroupManager;
-import io.pravega.client.netty.impl.ConnectionFactory;
+import io.pravega.client.connection.impl.ConnectionFactory;
 import io.pravega.client.stream.EventStreamReader;
 import io.pravega.client.stream.EventStreamWriter;
 import io.pravega.client.stream.EventWriterConfig;
@@ -40,25 +40,27 @@ import io.pravega.controller.server.SegmentHelper;
 import io.pravega.controller.server.eventProcessor.ControllerEventProcessorConfig;
 import io.pravega.controller.server.eventProcessor.requesthandlers.AbortRequestHandler;
 import io.pravega.controller.server.eventProcessor.requesthandlers.CommitRequestHandler;
-import io.pravega.controller.server.rpc.auth.GrpcAuthHelper;
+import io.pravega.controller.server.security.auth.GrpcAuthHelper;
 import io.pravega.controller.store.checkpoint.CheckpointStoreException;
 import io.pravega.controller.store.checkpoint.CheckpointStoreFactory;
 import io.pravega.controller.store.host.HostControllerStore;
 import io.pravega.controller.store.host.HostStoreFactory;
 import io.pravega.controller.store.host.impl.HostMonitorConfigImpl;
+import io.pravega.controller.store.kvtable.KVTableMetadataStore;
 import io.pravega.controller.store.stream.BucketStore;
 import io.pravega.controller.store.stream.State;
 import io.pravega.controller.store.stream.StoreException;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamStoreFactory;
 import io.pravega.controller.store.stream.TxnStatus;
-import io.pravega.controller.store.stream.Version;
+import io.pravega.controller.store.Version;
 import io.pravega.controller.store.stream.VersionedTransactionData;
 import io.pravega.controller.store.stream.records.StreamSegmentRecord;
 import io.pravega.controller.store.task.TaskMetadataStore;
 import io.pravega.controller.store.task.TaskStoreFactory;
 import io.pravega.controller.stream.api.grpc.v1.Controller;
 import io.pravega.controller.stream.api.grpc.v1.Controller.PingTxnStatus;
+import io.pravega.controller.task.KeyValueTable.TableMetadataTasks;
 import io.pravega.shared.controller.event.AbortEvent;
 import io.pravega.shared.controller.event.CommitEvent;
 import io.pravega.shared.controller.event.ControllerEvent;
@@ -85,6 +87,7 @@ import lombok.Cleanup;
 import lombok.SneakyThrows;
 import lombok.val;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.NotImplementedException;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.curator.framework.CuratorFramework;
@@ -95,6 +98,7 @@ import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
@@ -135,6 +139,10 @@ public class StreamTransactionMetadataTasksTest {
     private StreamMetadataTasks streamMetadataTasks;
     private StreamTransactionMetadataTasks txnTasks;
     private ConnectionFactory connectionFactory;
+    @Mock
+    private KVTableMetadataStore kvtStore;
+    @Mock
+    private TableMetadataTasks kvtMetadataTasks;
 
     private RequestTracker requestTracker = new RequestTracker(true);
 
@@ -227,7 +235,7 @@ public class StreamTransactionMetadataTasksTest {
         txnTasks.initializeStreamWriters(commitWriter, abortWriter);
 
         // Create ControllerService.
-        consumer = new ControllerService(streamStore, bucketStore, streamMetadataTasks, txnTasks,
+        consumer = new ControllerService(kvtStore, kvtMetadataTasks, streamStore, bucketStore, streamMetadataTasks, txnTasks,
                 segmentHelperMock, executor, null);
 
         final ScalingPolicy policy1 = ScalingPolicy.fixed(2);
@@ -267,7 +275,7 @@ public class StreamTransactionMetadataTasksTest {
 
         txnTasks.initializeStreamWriters(commitWriter, abortWriter);
 
-        consumer = new ControllerService(streamStore, bucketStore, streamMetadataTasks, txnTasks,
+        consumer = new ControllerService(kvtStore, kvtMetadataTasks, streamStore, bucketStore, streamMetadataTasks, txnTasks,
                 segmentHelperMock, executor, null);
 
         // Create test scope and stream.
@@ -393,7 +401,7 @@ public class StreamTransactionMetadataTasksTest {
                 GrpcAuthHelper.getDisabledAuthHelper());
         txnTasks.initializeStreamWriters(commitWriter, abortWriter);
 
-        consumer = new ControllerService(streamStore, bucketStore, streamMetadataTasks, txnTasks,
+        consumer = new ControllerService(kvtStore, kvtMetadataTasks, streamStore, bucketStore, streamMetadataTasks, txnTasks,
                 segmentHelperMock, executor, null);
 
         final ScalingPolicy policy1 = ScalingPolicy.fixed(2);
@@ -468,7 +476,7 @@ public class StreamTransactionMetadataTasksTest {
         txnTasks.initializeStreamWriters(commitWriter, abortWriter);
 
         // Create ControllerService.
-        consumer = new ControllerService(streamStore, bucketStore, streamMetadataTasks, txnTasks,
+        consumer = new ControllerService(kvtStore, kvtMetadataTasks, streamStore, bucketStore, streamMetadataTasks, txnTasks,
                 segmentHelperMock, executor, null);
 
         final ScalingPolicy policy1 = ScalingPolicy.fixed(2);
@@ -598,7 +606,7 @@ public class StreamTransactionMetadataTasksTest {
         assertEquals(PingTxnStatus.Status.COMMITTED, txnTasks.pingTxn(SCOPE, STREAM, txnId, 10000L, null).join().getStatus());
 
         // complete commit of transaction. 
-        streamStoreMock.startCommitTransactions(SCOPE, STREAM, null, executor).join();
+        streamStoreMock.startCommitTransactions(SCOPE, STREAM, 100, null, executor).join();
         val record = streamStoreMock.getVersionedCommittingTransactionsRecord(SCOPE, STREAM, null, executor).join();
         streamStoreMock.completeCommitTransactions(SCOPE, STREAM, record, null, executor).join();
 
@@ -748,6 +756,11 @@ public class StreamTransactionMetadataTasksTest {
         public CompletableFuture<Void> writeEvent(String routingKey, T event) {
             requestsReceived.offer(new ImmutablePair<>(routingKey, event));
             return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> writeEvents(String routingKey, List<T> events) {
+            throw new NotImplementedException("mock doesnt require this");
         }
 
         @Override

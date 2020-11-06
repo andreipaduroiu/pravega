@@ -10,6 +10,7 @@
 package io.pravega.client.stream.impl;
 
 import com.google.common.base.Preconditions;
+import io.pravega.client.control.impl.Controller;
 import io.pravega.client.security.auth.DelegationTokenProvider;
 import io.pravega.client.security.auth.DelegationTokenProviderFactory;
 import io.pravega.client.segment.impl.Segment;
@@ -116,19 +117,40 @@ public class EventStreamWriterImpl<Type> implements EventStreamWriter<Type> {
         ByteBuffer data = serializer.serialize(event);
         CompletableFuture<Void> ackFuture = new CompletableFuture<Void>();
         synchronized (writeFlushLock) {
-            synchronized (writeSealLock) {                
-                SegmentOutputStream segmentWriter = selector.getSegmentOutputStreamForKey(routingKey);
-                while (segmentWriter == null) {
-                    log.info("Don't have a writer for segment: {}", selector.getSegmentForEvent(routingKey));
-                    handleMissingLog();
-                    segmentWriter = selector.getSegmentOutputStreamForKey(routingKey);
-                }
+            synchronized (writeSealLock) {
+                SegmentOutputStream segmentWriter = getSegmentWriter(routingKey);
                 segmentWriter.write(PendingEvent.withHeader(routingKey, data, ackFuture));
             }
         }
         return ackFuture;
     }
-    
+
+    @Override
+    public CompletableFuture<Void> writeEvents(String routingKey, List<Type> events) {
+        Preconditions.checkNotNull(routingKey);
+        Preconditions.checkNotNull(events);
+        Exceptions.checkNotClosed(closed.get(), this);
+        List<ByteBuffer> data = events.stream().map(serializer::serialize).collect(Collectors.toList());
+        CompletableFuture<Void> ackFuture = new CompletableFuture<Void>();
+        synchronized (writeFlushLock) {
+            synchronized (writeSealLock) {
+                SegmentOutputStream segmentWriter = getSegmentWriter(routingKey);
+                segmentWriter.write(PendingEvent.withHeader(routingKey, data, ackFuture));
+            }
+        }
+        return ackFuture;
+    }
+
+    private SegmentOutputStream getSegmentWriter(String routingKey) {
+        SegmentOutputStream segmentWriter = selector.getSegmentOutputStreamForKey(routingKey);
+        while (segmentWriter == null) {
+            log.info("Don't have a writer for segment: {}", selector.getSegmentForEvent(routingKey));
+            handleMissingLog();
+            segmentWriter = selector.getSegmentOutputStreamForKey(routingKey);
+        }
+        return segmentWriter;
+    }
+
     @GuardedBy("writeSealLock")
     private void handleMissingLog() {
         List<PendingEvent> toResend = selector.refreshSegmentEventWriters(segmentSealedCallBack);
@@ -142,7 +164,7 @@ public class EventStreamWriterImpl<Type> implements EventStreamWriter<Type> {
     private void handleLogSealed(Segment segment) {
         sealedSegmentQueue.add(segment);
         retransmitPool.execute(() -> {
-            Retry.indefinitelyWithExpBackoff(config.getInitalBackoffMillis(), config.getBackoffMultiple(),
+            Retry.indefinitelyWithExpBackoff(config.getInitialBackoffMillis(), config.getBackoffMultiple(),
                                              config.getMaxBackoffMillis(),
                                              t -> log.error("Encountered exception when handling a sealed segment: ", t))
                  .run(() -> {

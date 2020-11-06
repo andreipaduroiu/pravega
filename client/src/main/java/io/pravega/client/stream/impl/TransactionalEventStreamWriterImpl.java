@@ -10,6 +10,7 @@
 package io.pravega.client.stream.impl;
 
 import com.google.common.base.Preconditions;
+import io.pravega.client.control.impl.Controller;
 import io.pravega.client.security.auth.DelegationTokenProvider;
 import io.pravega.client.security.auth.DelegationTokenProviderFactory;
 import io.pravega.client.segment.impl.Segment;
@@ -25,15 +26,15 @@ import io.pravega.client.stream.TxnFailedException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
+import io.pravega.common.concurrent.Futures;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 
-import static io.pravega.common.concurrent.Futures.getAndHandleExceptions;
+import static io.pravega.shared.NameUtils.getEpoch;
 
 /**
  * This class creates transactions, and manages their lifecycle.
@@ -126,8 +127,8 @@ public class TransactionalEventStreamWriterImpl<Type> implements TransactionalEv
             for (SegmentTransaction<Type> tx : inner.values()) {
                 tx.close();
             }
-            final CompletableFuture<Void> future = controller.commitTransaction(stream, writerId, timestamp, txId);
-            getAndHandleExceptions(future, TxnFailedException::new);
+            inner.clear(); // clear all references to SegmentTransaction to enable garbage collection.
+            Futures.getThrowingException(controller.commitTransaction(stream, writerId, timestamp, txId));
             pinger.stopPing(txId);
             closed.set(true);
         }
@@ -144,7 +145,8 @@ public class TransactionalEventStreamWriterImpl<Type> implements TransactionalEv
                         log.debug("Got exception while writing to transaction on abort: {}", e.getMessage());
                     }
                 }
-                getAndHandleExceptions(controller.abortTransaction(stream, txId), RuntimeException::new);
+                inner.clear(); // clear all references to SegmentTransaction to enable garbage collection.
+                Futures.getThrowingException(controller.abortTransaction(stream, txId));
                 closed.set(true);
             }
         }
@@ -152,7 +154,7 @@ public class TransactionalEventStreamWriterImpl<Type> implements TransactionalEv
         @Override
         public Status checkStatus() {
             log.info("Check transaction status {}", txId);
-            return getAndHandleExceptions(controller.checkTransactionStatus(stream, txId), RuntimeException::new);
+            return Futures.getThrowingException(controller.checkTransactionStatus(stream, txId));
         }
 
         @Override
@@ -170,15 +172,14 @@ public class TransactionalEventStreamWriterImpl<Type> implements TransactionalEv
         
         private void throwIfClosed() throws TxnFailedException {
             if (closed.get()) {
-                throw new TxnFailedException();
+                throw new TxnFailedException(getTxnId().toString());
             }
         }
     }
 
     @Override
     public Transaction<Type> beginTxn() {
-        TxnSegments txnSegments = getAndHandleExceptions(controller.createTransaction(stream, config.getTransactionTimeoutTime()),
-                RuntimeException::new);
+        TxnSegments txnSegments = Futures.getThrowingException(controller.createTransaction(stream, config.getTransactionTimeoutTime()));
         log.info("Transaction {} created", txnSegments.getTxnId());
         UUID txnId = txnSegments.getTxnId();
         Map<Segment, SegmentTransaction<Type>> transactions = new HashMap<>();
@@ -199,13 +200,19 @@ public class TransactionalEventStreamWriterImpl<Type> implements TransactionalEv
 
     @Override
     public Transaction<Type> getTxn(UUID txId) {
-        StreamSegments segments = getAndHandleExceptions(
-                controller.getCurrentSegments(stream.getScope(), stream.getStreamName()), RuntimeException::new);
-        Status status = getAndHandleExceptions(controller.checkTransactionStatus(stream, txId), RuntimeException::new);
+        // check if the transaction is open.
+        Status status = Futures.getThrowingException(controller.checkTransactionStatus(stream, txId));
         if (status != Status.OPEN) {
             return new TransactionImpl<>(writerId, txId, controller, stream);
         }
-        
+
+        // get the segments corresponding to the transaction.
+        StreamSegments segments = Futures.getThrowingException(
+                controller.getEpochSegments(stream.getScope(), stream.getStreamName(), getEpoch(txId)));
+        assert segments != null : "Epoch segments returned is null";
+        Preconditions.checkState(segments.getSegments().size() > 0, "There should be at least 1 epoch segment");
+
+        //Create OutputStream for every segment.
         Map<Segment, SegmentTransaction<Type>> transactions = new HashMap<>();
         DelegationTokenProvider tokenProvider = null;
         for (Segment s : segments.getSegments()) {

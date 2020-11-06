@@ -13,22 +13,24 @@ package io.pravega.test.integration.selftest.adapters;
 import io.pravega.client.EventStreamClientFactory;
 import io.pravega.client.admin.StreamManager;
 import io.pravega.client.stream.mock.MockStreamManager;
-import io.pravega.common.util.ArrayView;
 import io.pravega.common.util.AsyncIterator;
 import io.pravega.common.util.BufferView;
 import io.pravega.segmentstore.contracts.AttributeUpdate;
 import io.pravega.segmentstore.contracts.MergeStreamSegmentResult;
 import io.pravega.segmentstore.contracts.ReadResult;
 import io.pravega.segmentstore.contracts.SegmentProperties;
+import io.pravega.segmentstore.contracts.SegmentType;
 import io.pravega.segmentstore.contracts.StreamSegmentExistsException;
 import io.pravega.segmentstore.contracts.StreamSegmentInformation;
 import io.pravega.segmentstore.contracts.StreamSegmentNotExistsException;
 import io.pravega.segmentstore.contracts.StreamSegmentStore;
+import io.pravega.segmentstore.contracts.tables.IteratorArgs;
 import io.pravega.segmentstore.contracts.tables.IteratorItem;
 import io.pravega.segmentstore.contracts.tables.TableEntry;
 import io.pravega.segmentstore.contracts.tables.TableKey;
 import io.pravega.segmentstore.contracts.tables.TableStore;
 import io.pravega.segmentstore.server.host.handler.PravegaConnectionListener;
+import io.pravega.test.common.NoOpScheduledExecutor;
 import io.pravega.test.integration.selftest.TestConfig;
 import java.time.Duration;
 import java.util.Collection;
@@ -76,7 +78,8 @@ class InProcessMockClientAdapter extends ClientAdapterBase {
     @Override
     protected void startUp() throws Exception {
         int segmentStorePort = this.testConfig.getSegmentStorePort(0);
-        this.listener = new PravegaConnectionListener(false, segmentStorePort, getStreamSegmentStore(), getTableStore());
+        this.listener = new PravegaConnectionListener(false, segmentStorePort, getStreamSegmentStore(),
+                getTableStore(), NoOpScheduledExecutor.get());
         this.listener.startListening();
 
         this.streamManager = new MockStreamManager(SCOPE, LISTENING_ADDRESS, segmentStorePort);
@@ -142,7 +145,8 @@ class InProcessMockClientAdapter extends ClientAdapterBase {
         private final Object lock = new Object();
 
         @Override
-        public CompletableFuture<Void> createStreamSegment(String streamSegmentName, Collection<AttributeUpdate> attributes, Duration timeout) {
+        public CompletableFuture<Void> createStreamSegment(String streamSegmentName, SegmentType segmentType,
+                                                           Collection<AttributeUpdate> attributes, Duration timeout) {
             return CompletableFuture.runAsync(() -> {
                 synchronized (this.lock) {
                     if (this.segments.put(streamSegmentName, 0L) == null) {
@@ -252,7 +256,7 @@ class InProcessMockClientAdapter extends ClientAdapterBase {
 
     private static class MockTableStore implements TableStore {
         @Override
-        public CompletableFuture<Void> createSegment(String segmentName, Duration timeout) {
+        public CompletableFuture<Void> createSegment(String segmentName, SegmentType segmentType, Duration timeout) {
             throw new UnsupportedOperationException("createTableSegment");
         }
 
@@ -277,22 +281,37 @@ class InProcessMockClientAdapter extends ClientAdapterBase {
         }
 
         @Override
+        public CompletableFuture<List<Long>> put(String segmentName, List<TableEntry> entries, long tableSegmentOffset, Duration timeout) {
+            throw new UnsupportedOperationException("updateTableSegment");
+        }
+
+        @Override
         public CompletableFuture<Void> remove(String segmentName, Collection<TableKey> keys, Duration timeout) {
             throw new UnsupportedOperationException("remove");
         }
 
         @Override
-        public CompletableFuture<List<TableEntry>> get(String segmentName, List<ArrayView> keys, Duration timeout) {
+        public CompletableFuture<Void> remove(String segmentName, Collection<TableKey> keys, long tableSegmentOffset, Duration timeout) {
+            throw new UnsupportedOperationException("remove");
+        }
+
+        @Override
+        public CompletableFuture<List<TableEntry>> get(String segmentName, List<BufferView> keys, Duration timeout) {
             throw new UnsupportedOperationException("get");
         }
 
         @Override
-        public CompletableFuture<AsyncIterator<IteratorItem<TableKey>>> keyIterator(String segmentName, byte[] serializedState, Duration fetchTimeout) {
+        public CompletableFuture<AsyncIterator<IteratorItem<TableKey>>> keyIterator(String segmentName, IteratorArgs args) {
             throw new UnsupportedOperationException("keyIterator");
         }
 
         @Override
-        public CompletableFuture<AsyncIterator<IteratorItem<TableEntry>>> entryIterator(String segmentName, byte[] serializedState, Duration fetchTimeout) {
+        public CompletableFuture<AsyncIterator<IteratorItem<TableEntry>>> entryIterator(String segmentName, IteratorArgs args) {
+            throw new UnsupportedOperationException("entryIterator");
+        }
+
+        @Override
+        public CompletableFuture<AsyncIterator<IteratorItem<TableEntry>>> entryDeltaIterator(String segmentName, long fromPosition, Duration fetchTimeout) {
             throw new UnsupportedOperationException("entryIterator");
         }
     }

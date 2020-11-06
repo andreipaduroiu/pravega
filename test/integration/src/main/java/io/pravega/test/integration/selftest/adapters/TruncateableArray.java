@@ -13,7 +13,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterators;
 import io.pravega.common.io.StreamHelpers;
 import io.pravega.common.util.ArrayView;
-import io.pravega.common.util.BufferView;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -23,6 +22,7 @@ import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Iterator;
 import javax.annotation.concurrent.NotThreadSafe;
 
 /**
@@ -137,7 +137,7 @@ public class TruncateableArray implements ArrayView {
     }
 
     @Override
-    public BufferView slice(int offset, int length) {
+    public ArrayView slice(int offset, int length) {
         throw new UnsupportedOperationException("slice() not supported.");
     }
 
@@ -157,10 +157,20 @@ public class TruncateableArray implements ArrayView {
     }
 
     @Override
+    public <ExceptionT extends Exception> void collect(Collector<ExceptionT> bufferCollector) throws ExceptionT {
+        throw new UnsupportedOperationException("collect() not supported.");
+    }
+
+    @Override
+    public Iterator<ByteBuffer> iterateBuffers() {
+        throw new UnsupportedOperationException("iterateBuffers() not supported.");
+    }
+
+    @Override
     public byte[] getCopy() {
         throw new UnsupportedOperationException("getCopy() not supported.");
     }
-    
+
     //endregion
 
     //region Operations

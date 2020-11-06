@@ -38,16 +38,18 @@ import org.junit.Before;
 public abstract class LeakDetectorTestSuite extends ThreadPooledTestSuite {
     private ResourceLeakDetector.Level originalLevel;
 
+    @Override
     @Before
-    public void before() {
+    public void before() throws Exception {
         super.before();
         InternalLoggerFactory.setDefaultFactory(new ResourceLeakLoggerFactory());
         this.originalLevel = ResourceLeakDetector.getLevel();
         ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
     }
 
+    @Override
     @After
-    public void after() throws InterruptedException {
+    public void after() throws Exception {
         super.after();
         ResourceLeakDetector.setLevel(this.originalLevel);
     }

@@ -11,12 +11,15 @@ You may obtain a copy of the License at
 
 Pravega is an open source distributed storage service implementing **Streams**. It offers Stream as the main primitive for the foundation of reliable storage systems: a *high-performance, durable, elastic, and unlimited append-only byte stream with strict ordering and consistency*.
 
-To learn more about Pravega, visit http://pravega.io
+To learn more about Pravega, visit https://pravega.io
 
 ## Prerequisites
 
-- Java 8+
+- Java 11+
 
+ In spite of the requirements of using JDK 11+ to build this project, `client` artifacts (and its dependencies) must be compatible with a *Java 8* runtime. All other components are built and ran using JDK11+.
+
+The `clientJavaVersion` project property determines the version used to build the client (defaults to *8*).
 ## Building Pravega
 
 Checkout the source code:
@@ -57,6 +60,8 @@ To import the source into IntelliJ:
 
 For eclipse, you can generate eclipse project files by running `./gradlew eclipse`.
 
+<sup> Note: Some unit tests will create (and delete) a significant amount of files. For improved performance on Windows machines, be sure to add the appropriate 'Microsoft Defender' exclusion.</sup>
+
 ## Releases
 
 The latest pravega releases can be found on the [Github Release](https://github.com/pravega/pravega/releases) project page.
@@ -71,14 +76,12 @@ Pravega can be installed locally or in a distributed environment. The installati
 
 ## Support
 
-Don’t hesitate to ask! Contact the developers and community on the [mailing lists](https://groups.google.com/forum/#!forum/pravega-users) or on [slack](https://pravega-io.slack.com/) if you need any help.
-Open an issue if you found a bug on [Github
-Issues](https://github.com/pravega/pravega/issues).
+Don’t hesitate to ask! Contact the developers and community on [slack](https://pravega-io.slack.com/) ([signup](https://pravega-slack-invite.herokuapp.com/)) if you need any help. Open an issue if you found a bug on [Github Issues](https://github.com/pravega/pravega/issues).
 
 ## Documentation
 
-The Pravega documentation of is hosted on the website:
-<http://pravega.io/docs/latest> or in the [documentation](documentation/src/docs) directory of the source code.
+The Pravega documentation is hosted on the website:
+<https://pravega.io/docs/latest> or in the [documentation](documentation/src/docs) directory of the source code.
 
 ## Contributing
 

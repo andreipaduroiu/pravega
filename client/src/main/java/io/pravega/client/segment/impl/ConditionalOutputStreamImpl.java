@@ -9,11 +9,14 @@
  */
 package io.pravega.client.segment.impl;
 
+import com.google.common.annotations.VisibleForTesting;
 import io.netty.buffer.Unpooled;
-import io.pravega.client.netty.impl.ConnectionFactory;
-import io.pravega.client.netty.impl.RawClient;
+import io.pravega.auth.AuthenticationException;
+import io.pravega.auth.TokenExpiredException;
+import io.pravega.client.connection.impl.ConnectionPool;
+import io.pravega.client.connection.impl.RawClient;
 import io.pravega.client.security.auth.DelegationTokenProvider;
-import io.pravega.client.stream.impl.Controller;
+import io.pravega.client.control.impl.Controller;
 import io.pravega.common.Exceptions;
 import io.pravega.common.util.Retry.RetryWithBackoff;
 import io.pravega.shared.protocol.netty.ConnectionFailedException;
@@ -27,6 +30,7 @@ import io.pravega.shared.protocol.netty.WireCommands.Event;
 import io.pravega.shared.protocol.netty.WireCommands.SegmentIsSealed;
 import io.pravega.shared.protocol.netty.WireCommands.SetupAppend;
 import io.pravega.shared.protocol.netty.WireCommands.WrongHost;
+import io.pravega.shared.protocol.netty.WireCommands.AuthTokenCheckFailed;
 import java.nio.ByteBuffer;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -45,7 +49,7 @@ class ConditionalOutputStreamImpl implements ConditionalOutputStream {
     private final UUID writerId;
     private final Segment segmentId;
     private final Controller controller;
-    private final ConnectionFactory connectionFactory;
+    private final ConnectionPool connectionPool;
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final Object lock = new Object();
     @GuardedBy("lock")
@@ -62,13 +66,21 @@ class ConditionalOutputStreamImpl implements ConditionalOutputStream {
 
     @Override
     public boolean write(ByteBuffer data, long expectedOffset) throws SegmentSealedException {
+        Exceptions.checkNotClosed(closed.get(), this);
         synchronized (lock) { //Used to preserver order.
             long appendSequence = requestIdGenerator.get();
-            return retrySchedule.retryingOn(ConnectionFailedException.class)
-                    .throwingOn(SegmentSealedException.class)
+            return retrySchedule.retryWhen(e -> {
+                        Throwable cause = Exceptions.unwrap(e);
+                        boolean hasTokenExpired = cause instanceof TokenExpiredException;
+                        if (hasTokenExpired) {
+                            this.tokenProvider.signalTokenExpired();
+                        }
+                        return cause instanceof Exception &&
+                                (hasTokenExpired || cause instanceof ConnectionFailedException);
+                    })
                     .run(() -> {
                         if (client == null || client.isClosed()) {
-                            client = new RawClient(controller, connectionFactory, segmentId);
+                            client = new RawClient(controller, connectionPool, segmentId);
                             long requestId = client.getFlow().getNextSequenceNumber();
                             log.debug("Setting up appends on segment {} for ConditionalOutputStream.", segmentId);
 
@@ -104,7 +116,7 @@ class ConditionalOutputStreamImpl implements ConditionalOutputStream {
         if (reply instanceof AppendSetup) {
             return (AppendSetup) reply;
         } else {
-            throw handelUnexpectedReply(reply);
+            throw handleUnexpectedReply(reply);
         }
     }
 
@@ -114,11 +126,12 @@ class ConditionalOutputStreamImpl implements ConditionalOutputStream {
         } else if (reply instanceof ConditionalCheckFailed) {
             return false;
         } else {
-            throw handelUnexpectedReply(reply);
+            throw handleUnexpectedReply(reply);
         }
     }
-    
-    private RuntimeException handelUnexpectedReply(Reply reply) {
+
+    @VisibleForTesting
+    RuntimeException handleUnexpectedReply(Reply reply) {
         closeConnection(reply.toString());
         if (reply instanceof WireCommands.NoSuchSegment) {
             throw new NoSuchSegmentException(reply.toString());
@@ -126,6 +139,14 @@ class ConditionalOutputStreamImpl implements ConditionalOutputStream {
             throw Exceptions.sneakyThrow(new SegmentSealedException(reply.toString()));
         } else if (reply instanceof WrongHost) {
             throw Exceptions.sneakyThrow(new ConnectionFailedException(reply.toString()));
+        } else if (reply instanceof AuthTokenCheckFailed) {
+            AuthTokenCheckFailed authTokenCheckFailed = (WireCommands.AuthTokenCheckFailed) reply;
+            if (authTokenCheckFailed.isTokenExpired()) {
+                this.tokenProvider.signalTokenExpired();
+                throw Exceptions.sneakyThrow(new TokenExpiredException(authTokenCheckFailed.getServerStackTrace()));
+            } else {
+                throw Exceptions.sneakyThrow(new AuthenticationException(authTokenCheckFailed.toString()));
+            }
         } else {
             throw Exceptions.sneakyThrow(new ConnectionFailedException("Unexpected reply of " + reply + " when expecting an AppendSetup"));
         }

@@ -20,6 +20,8 @@ import io.pravega.segmentstore.server.IllegalContainerStateException;
 import io.pravega.shared.protocol.netty.Request;
 import io.pravega.shared.protocol.netty.RequestProcessor;
 import io.pravega.shared.protocol.netty.WireCommand;
+import io.pravega.shared.protocol.netty.WireCommands;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import lombok.extern.slf4j.Slf4j;
 
@@ -30,6 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 public class ServerConnectionInboundHandler extends ChannelInboundHandlerAdapter implements ServerConnection {
     private final AtomicReference<RequestProcessor> processor = new AtomicReference<>();
     private final AtomicReference<Channel> channel = new AtomicReference<>();
+    private final AtomicBoolean isClosed = new AtomicBoolean(false);
 
     @Override
     public void channelRegistered(ChannelHandlerContext ctx) throws Exception {
@@ -50,7 +53,15 @@ public class ServerConnectionInboundHandler extends ChannelInboundHandlerAdapter
         if (requestProcessor == null) {
             throw new IllegalStateException("No command processor set for connection");
         }
-        cmd.process(requestProcessor);
+        try {
+            cmd.process(requestProcessor);
+        } catch (Throwable ex) {
+            // Release buffers in case of an unhandled exception.
+            if (cmd instanceof WireCommands.ReleasableCommand) {
+                ((WireCommands.ReleasableCommand) cmd).release(); // Idempotent. Invoking multiple times has no side effects.
+            }
+            throw ex;
+        }
     }
 
     @Override
@@ -79,11 +90,18 @@ public class ServerConnectionInboundHandler extends ChannelInboundHandlerAdapter
 
     @Override
     public void close() {
-        Channel ch = channel.get();
-        if (ch != null) {
-            // wait for all messages to be sent before closing the channel.
-            ch.eventLoop().execute(() -> ch.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE));
+        if (isClosed.compareAndSet(false, true)) {
+            Channel ch = channel.get();
+            if (ch != null) {
+                // wait for all messages to be sent before closing the channel.
+                ch.eventLoop().execute(() -> ch.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE));
+            }
         }
+    }
+
+    @Override
+    public boolean isClosed() {
+        return isClosed.get();
     }
 
     @Override

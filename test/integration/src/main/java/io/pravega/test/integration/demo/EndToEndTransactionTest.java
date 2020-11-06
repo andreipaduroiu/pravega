@@ -9,12 +9,16 @@
  */
 package io.pravega.test.integration.demo;
 
+import io.pravega.client.ClientConfig;
+import io.pravega.client.connection.impl.ConnectionFactory;
+import io.pravega.client.connection.impl.ConnectionPoolImpl;
+import io.pravega.client.connection.impl.SocketConnectionFactoryImpl;
 import io.pravega.client.stream.EventWriterConfig;
 import io.pravega.client.stream.ScalingPolicy;
 import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.client.stream.Transaction;
 import io.pravega.client.stream.TransactionalEventStreamWriter;
-import io.pravega.client.stream.impl.Controller;
+import io.pravega.client.control.impl.Controller;
 import io.pravega.client.stream.impl.UTF8StringSerializer;
 import io.pravega.client.stream.mock.MockClientFactory;
 import io.pravega.controller.util.Config;
@@ -47,7 +51,8 @@ public class EndToEndTransactionTest {
         StreamSegmentStore store = serviceBuilder.createStreamSegmentService();
         int port = Config.SERVICE_PORT;
         @Cleanup
-        PravegaConnectionListener server = new PravegaConnectionListener(false, port, store, serviceBuilder.createTableStoreService());
+        PravegaConnectionListener server = new PravegaConnectionListener(false, port, store,
+                serviceBuilder.createTableStoreService(), serviceBuilder.getLowPriorityExecutor());
         server.startListening();
 
         Thread.sleep(1000);
@@ -78,8 +83,11 @@ public class EndToEndTransactionTest {
 
         final long txnTimeout = 4000;
 
+        ClientConfig config = ClientConfig.builder().build();
         @Cleanup
-        MockClientFactory clientFactory = new MockClientFactory(testScope, controller);
+        ConnectionFactory connectionFactory = new SocketConnectionFactoryImpl(config);
+        @Cleanup
+        MockClientFactory clientFactory = new MockClientFactory(testScope, controller, new ConnectionPoolImpl(config, connectionFactory));
 
         @Cleanup
         TransactionalEventStreamWriter<String> producer = clientFactory.createTransactionalEventWriter(

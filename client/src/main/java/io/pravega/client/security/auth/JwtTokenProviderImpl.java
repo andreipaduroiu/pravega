@@ -11,21 +11,20 @@ package io.pravega.client.security.auth;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-import io.pravega.client.stream.impl.Controller;
+import io.pravega.client.control.impl.Controller;
 import io.pravega.common.Exceptions;
 import io.pravega.common.LoggerHelpers;
 import io.pravega.common.util.ConfigurationOptionsExtractor;
+import java.time.Instant;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
-import java.time.Instant;
-import java.util.Base64;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import static io.pravega.common.security.JwtUtils.extractExpirationTime;
 
 /**
  * Provides JWT-based delegation tokens.
@@ -44,15 +43,6 @@ public class JwtTokenProviderImpl implements DelegationTokenProvider {
     private static final String REFRESH_THRESHOLD_ENV_VARIABLE = "pravega_client_auth_token-refresh.threshold";
 
     /**
-     * The regex pattern for extracting "exp" field from the JWT.
-     *
-     * Examples:
-     *    Input:- {"sub":"subject","aud":"segmentstore","iat":1569837384,"exp":1569837434}, output:- "exp":1569837434
-     *    Input:- {"sub": "subject","aud": "segmentstore","iat": 1569837384,"exp": 1569837434}, output:- "exp": 1569837434
-     */
-    private static final Pattern JWT_EXPIRATION_PATTERN = Pattern.compile("\"exp\":\\s?(\\d+)");
-
-    /**
      * Represents the threshold (in seconds) for triggering delegation token refresh.
      */
     @VisibleForTesting
@@ -69,6 +59,8 @@ public class JwtTokenProviderImpl implements DelegationTokenProvider {
     private final String streamName;
 
     private final AtomicReference<DelegationToken> delegationToken = new AtomicReference<>();
+
+    private final AtomicBoolean tokenExpirySignal = new AtomicBoolean(false);
 
     @VisibleForTesting
     @Getter(AccessLevel.PACKAGE)
@@ -133,48 +125,6 @@ public class JwtTokenProviderImpl implements DelegationTokenProvider {
         this.refreshThresholdInSeconds = refreshThresholdInSeconds;
     }
 
-    @VisibleForTesting
-    static Long extractExpirationTime(String token) {
-        if (token == null || token.trim().equals("")) {
-            return null;
-        }
-        String[] tokenParts = token.split("\\.");
-
-        //A JWT token has 3 parts: the header, the body and the signature.
-        if (tokenParts == null || tokenParts.length != 3) {
-            return null;
-        }
-
-        // The second part of the JWT token is the body, which contains the expiration time if present.
-        String encodedBody = tokenParts[1];
-        String decodedJsonBody = new String(Base64.getDecoder().decode(encodedBody));
-
-        return parseExpirationTime(decodedJsonBody);
-    }
-
-    @VisibleForTesting
-    static Long parseExpirationTime(String jwtBody) {
-        Long result = null;
-        if (jwtBody != null && !jwtBody.trim().equals("")) {
-            Matcher matcher = JWT_EXPIRATION_PATTERN.matcher(jwtBody);
-            if (matcher.find()) {
-               // Should look like this, if a proper match is found: "exp": 1569837434
-               String matchedString = matcher.group();
-
-               String[] expiryTimeFieldParts = matchedString.split(":");
-               if (expiryTimeFieldParts != null && expiryTimeFieldParts.length == 2) {
-                   try {
-                       result = Long.parseLong(expiryTimeFieldParts[1].trim());
-                   } catch (NumberFormatException e) {
-                       // ignore
-                       log.warn("Encountered this exception when parsing JWT body for expiration time: {}", e.getMessage());
-                   }
-               }
-            }
-        }
-        return result;
-    }
-
     /**
      * Returns the delegation token. It returns existing delegation token if it is not close to expiry. If the token
      * is close to expiry, it obtains a new delegation token and returns that one instead.
@@ -184,17 +134,22 @@ public class JwtTokenProviderImpl implements DelegationTokenProvider {
     @Override
     public CompletableFuture<String> retrieveToken() {
         DelegationToken currentToken = this.delegationToken.get();
-
+        final CompletableFuture<String> result;
         if (currentToken == null) {
-            return this.refreshToken();
+            result = this.refreshToken();
         } else if (currentToken.getExpiryTime() == null) {
-            return CompletableFuture.completedFuture(currentToken.getValue());
+            result = CompletableFuture.completedFuture(currentToken.getValue());
+        } else if (this.tokenExpirySignal.get()) {
+            log.debug("Token was signaled as expired for scope/stream {}/{}", this.scopeName, this.streamName);
+            result = refreshToken();
+            this.tokenExpirySignal.compareAndSet(true, false);
         } else if (isTokenNearingExpiry(currentToken)) {
             log.debug("Token is nearing expiry for scope/stream {}/{}", this.scopeName, this.streamName);
-            return refreshToken();
+            result = refreshToken();
         } else {
-            return CompletableFuture.completedFuture(currentToken.getValue());
+            result = CompletableFuture.completedFuture(currentToken.getValue());
         }
+        return result;
     }
 
     @Override
@@ -205,6 +160,11 @@ public class JwtTokenProviderImpl implements DelegationTokenProvider {
         } else {
             return this.delegationToken.compareAndSet(currentToken, new DelegationToken(token, extractExpirationTime(token)));
         }
+    }
+
+    @Override
+    public void signalTokenExpired() {
+        this.tokenExpirySignal.compareAndSet(false, true);
     }
 
     private boolean isTokenNearingExpiry(DelegationToken token) {

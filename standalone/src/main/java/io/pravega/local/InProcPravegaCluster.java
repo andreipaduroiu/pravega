@@ -12,7 +12,7 @@ package io.pravega.local;
 import com.google.common.base.Preconditions;
 import io.pravega.client.stream.impl.Credentials;
 import io.pravega.client.stream.impl.DefaultCredentials;
-import io.pravega.common.auth.ZKTLSUtils;
+import io.pravega.common.security.ZKTLSUtils;
 import com.google.common.base.Strings;
 import io.pravega.controller.server.ControllerServiceConfig;
 import io.pravega.controller.server.ControllerServiceMain;
@@ -36,6 +36,7 @@ import io.pravega.segmentstore.server.host.stat.AutoScalerConfig;
 import io.pravega.segmentstore.server.logs.DurableLogConfig;
 import io.pravega.segmentstore.server.store.ServiceBuilderConfig;
 import io.pravega.segmentstore.server.store.ServiceConfig;
+import io.pravega.segmentstore.storage.StorageLayoutType;
 import io.pravega.segmentstore.storage.impl.bookkeeper.ZooKeeperServiceRunner;
 import io.pravega.shared.metrics.MetricsConfig;
 import java.io.IOException;
@@ -47,6 +48,7 @@ import javax.annotation.concurrent.GuardedBy;
 import lombok.Builder;
 import lombok.Cleanup;
 import lombok.Synchronized;
+import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
@@ -55,6 +57,7 @@ import org.apache.curator.retry.ExponentialBackoffRetry;
 
 @Slf4j
 @Builder
+@ToString
 public class InProcPravegaCluster implements AutoCloseable {
 
     private static final int THREADPOOL_SIZE = 20;
@@ -62,35 +65,27 @@ public class InProcPravegaCluster implements AutoCloseable {
 
     /* Cluster name */
     private final String clusterName = "singlenode-" + UUID.randomUUID();
-    @Builder.Default
-    private boolean enableMetrics = false;
+    private boolean enableMetrics;
 
     /*Enabling this will configure security for the singlenode with hardcoded cert files and creds.*/
-    @Builder.Default
-    private boolean enableAuth = false;
-    @Builder.Default
-    private boolean enableTls = false;
+    private boolean enableAuth;
+    private boolean enableTls;
 
-    @Builder.Default
-    private boolean enableTlsReload = false;
+    private boolean enableTlsReload;
 
     /*Controller related variables*/
     private boolean isInProcController;
     private int controllerCount;
-    @Builder.Default
-    private int[] controllerPorts = null;
-    @Builder.Default
-    private String controllerURI = null;
+    private int[] controllerPorts;
+    private String controllerURI;
 
     /*REST server related variables*/
     private int restServerPort;
 
     /*SegmentStore related variables*/
     private boolean isInProcSegmentStore;
-    @Builder.Default
-    private int segmentStoreCount = 0;
-    @Builder.Default
-    private int[] segmentStorePorts = null;
+    private int segmentStoreCount;
+    private int[] segmentStorePorts;
 
 
     /*ZK related variables*/
@@ -105,8 +100,7 @@ public class InProcPravegaCluster implements AutoCloseable {
 
 
     /* SegmentStore configuration*/
-    @Builder.Default
-    private int containerCount = 4;
+    private int containerCount;
     private ServiceStarter[] nodeServiceStarter;
 
     private LocalHDFSEmulator localHdfs;
@@ -115,8 +109,7 @@ public class InProcPravegaCluster implements AutoCloseable {
 
     private String zkUrl;
 
-    @Builder.Default
-    private boolean enableRestServer = true;
+    private boolean enableRestServer;
     private String userName;
     private String passwd;
     private String certFile;
@@ -128,6 +121,11 @@ public class InProcPravegaCluster implements AutoCloseable {
     private String jksKeyFile;
 
     public static final class InProcPravegaClusterBuilder {
+
+        // default values
+        private int containerCount = 4;
+        private boolean enableRestServer = true;
+
         public InProcPravegaCluster build() {
             //Check for valid combinations of flags
             //For ZK
@@ -151,9 +149,7 @@ public class InProcPravegaCluster implements AutoCloseable {
                             && !Strings.isNullOrEmpty(this.keyPasswordFile)),
                     "TLS enabled, but not all parameters set");
 
-            if (this.isInMemStorage) {
-                this.isInProcHDFS = false;
-            }
+            this.isInProcHDFS = this.isInMemStorage ? false : true;
             return new InProcPravegaCluster(isInMemStorage, enableMetrics, enableAuth, enableTls, enableTlsReload,
                     isInProcController, controllerCount, controllerPorts, controllerURI,
                     restServerPort, isInProcSegmentStore, segmentStoreCount, segmentStorePorts, isInProcZK, zkPort, zkHost,
@@ -243,7 +239,9 @@ public class InProcPravegaCluster implements AutoCloseable {
     }
 
     private void startLocalHDFS() throws IOException {
-        localHdfs = LocalHDFSEmulator.newBuilder().baseDirName("temp").build();
+        String baseDir = "temp";
+        log.info("Starting HDFS Emulator @ {}/{}", System.getProperty("java.io.tmpdir"), baseDir);
+        localHdfs = LocalHDFSEmulator.newBuilder().baseDirName(baseDir).build();
         localHdfs.start();
     }
 
@@ -285,6 +283,7 @@ public class InProcPravegaCluster implements AutoCloseable {
                         .with(ServiceConfig.DATALOG_IMPLEMENTATION, isInMemStorage ?
                                 ServiceConfig.DataLogType.INMEMORY :
                                 ServiceConfig.DataLogType.BOOKKEEPER)
+                        .with(ServiceConfig.STORAGE_LAYOUT, StorageLayoutType.ROLLING_STORAGE)
                         .with(ServiceConfig.STORAGE_IMPLEMENTATION, isInMemStorage ?
                                 ServiceConfig.StorageType.INMEMORY :
                                 ServiceConfig.StorageType.FILESYSTEM))
@@ -440,5 +439,19 @@ public class InProcPravegaCluster implements AutoCloseable {
             this.zkService.close();
             this.zkService = null;
         }
+    }
+
+    // Assumes toString is autogenerated by Lombok.
+    public String print() {
+        String auto = this.toString();
+        int start = auto.indexOf("(") + 1;
+        int end = auto.indexOf(")");
+        String[] opts = auto.substring(start, end).split(",");
+        StringBuilder result = new StringBuilder(String.format("%s%n", auto.substring(0, start)));
+        for (String opt : opts) {
+            result.append(String.format("\t%s%n", opt.trim()));
+        }
+        result.append(auto.substring(end, auto.length()));
+        return result.toString();
     }
 }

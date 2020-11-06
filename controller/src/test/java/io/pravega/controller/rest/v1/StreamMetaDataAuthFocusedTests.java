@@ -12,7 +12,8 @@ package io.pravega.controller.rest.v1;
 import com.google.common.collect.ImmutableMap;
 import io.grpc.ServerBuilder;
 import io.pravega.client.ClientConfig;
-import io.pravega.client.netty.impl.ConnectionFactoryImpl;
+import io.pravega.client.connection.impl.ConnectionFactory;
+import io.pravega.client.connection.impl.SocketConnectionFactoryImpl;
 import io.pravega.client.stream.RetentionPolicy;
 import io.pravega.client.stream.ScalingPolicy;
 import io.pravega.client.stream.StreamConfiguration;
@@ -28,25 +29,11 @@ import io.pravega.controller.server.rest.generated.model.ScopesList;
 import io.pravega.controller.server.rest.generated.model.StreamState;
 import io.pravega.controller.server.rest.generated.model.StreamsList;
 import io.pravega.controller.server.rest.impl.RESTServerConfigImpl;
-import io.pravega.controller.server.rpc.auth.AuthHandlerManager;
-import io.pravega.controller.server.rpc.auth.StrongPasswordProcessor;
+import io.pravega.controller.server.security.auth.handler.AuthHandlerManager;
+import io.pravega.controller.server.security.auth.StrongPasswordProcessor;
 import io.pravega.controller.server.rpc.grpc.impl.GRPCServerConfigImpl;
 import io.pravega.controller.stream.api.grpc.v1.Controller;
 import io.pravega.test.common.TestUtils;
-import org.junit.After;
-import org.junit.AfterClass;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Test;
-
-import javax.ws.rs.client.Client;
-import javax.ws.rs.client.ClientBuilder;
-import javax.ws.rs.client.Entity;
-import javax.ws.rs.client.Invocation;
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.MultivaluedHashMap;
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.Response;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -63,6 +50,19 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import javax.ws.rs.client.Client;
+import javax.ws.rs.client.ClientBuilder;
+import javax.ws.rs.client.Entity;
+import javax.ws.rs.client.Invocation;
+import javax.ws.rs.core.HttpHeaders;
+import javax.ws.rs.core.MultivaluedHashMap;
+import javax.ws.rs.core.MultivaluedMap;
+import javax.ws.rs.core.Response;
+import org.junit.After;
+import org.junit.AfterClass;
+import org.junit.Before;
+import org.junit.BeforeClass;
+import org.junit.Test;
 
 import static io.pravega.controller.auth.AuthFileUtils.credentialsAndAclAsString;
 import static org.junit.Assert.assertEquals;
@@ -126,7 +126,7 @@ public class StreamMetaDataAuthFocusedTests {
     private static File passwordHandlerInputFile;
 
     @SuppressWarnings("checkstyle:StaticVariableName")
-    private static ConnectionFactoryImpl connectionFactory;
+    private static ConnectionFactory connectionFactory;
     
     // We want to ensure that the tests in this class are run one after another (in no particular sequence), as we
     // are using a shared server (for execution efficiency). We use this in setup and teardown method initiazers
@@ -146,33 +146,32 @@ public class StreamMetaDataAuthFocusedTests {
             String encryptedPassword = passwordEncryptor.encryptPassword(DEFAULT_PASSWORD);
 
             // This user can do anything in the system.
-            writer.write(credentialsAndAclAsString(USER_PRIVILEGED, encryptedPassword, "*,READ_UPDATE"));
+            writer.write(credentialsAndAclAsString(USER_PRIVILEGED, encryptedPassword, "prn::*,READ_UPDATE"));
 
-            // This user can list, get, update and delete all scopes
-            writer.write(credentialsAndAclAsString(USER_SCOPE_CREATOR, encryptedPassword, "/,READ_UPDATE"));
+            writer.write(credentialsAndAclAsString(USER_SCOPE_CREATOR, encryptedPassword, "prn::/,READ_UPDATE"));
 
             // This user can list scopes and upon listing will see all scopes (/*).
-            writer.write(credentialsAndAclAsString(USER_SCOPE_LISTER, encryptedPassword, "/,READ;/*,READ"));
+            writer.write(credentialsAndAclAsString(USER_SCOPE_LISTER, encryptedPassword, "prn::/,READ;prn::/*,READ"));
 
             // This user can list, read, update, delete all scopes. Upon listing scopes, this user will see all scopes.
-            writer.write(credentialsAndAclAsString(USER_SCOPE_MANAGER, encryptedPassword, "/,READ_UPDATE;/*,READ_UPDATE"));
+            writer.write(credentialsAndAclAsString(USER_SCOPE_MANAGER, encryptedPassword, "prn::/,READ_UPDATE;prn::/*,READ_UPDATE"));
 
             // This user can create, update, delete all child objects of a scope (streams, reader groups, etc.)
-            writer.write(credentialsAndAclAsString(USER_STREAMS_IN_A_SCOPE_CREATOR, encryptedPassword, "sisc-scope,READ_UPDATE;"));
+            writer.write(credentialsAndAclAsString(USER_STREAMS_IN_A_SCOPE_CREATOR, encryptedPassword, "prn::/scope:sisc-scope,READ_UPDATE;"));
 
-            writer.write(credentialsAndAclAsString(USER_USER1, encryptedPassword, "/,READ_UPDATE;scope1,READ_UPDATE;scope2,READ_UPDATE;"));
-            writer.write(credentialsAndAclAsString(USER_WITH_NO_ROOT_ACCESS, encryptedPassword, "scope1,READ_UPDATE;scope2,READ_UPDATE;"));
-            writer.write(credentialsAndAclAsString(USER_UNAUTHORIZED, encryptedPassword, "/,READ_UPDATE;scope1,READ_UPDATE;scope2,READ_UPDATE;"));
-            writer.write(credentialsAndAclAsString(USER_ACCESS_TO_SUBSET_OF_SCOPES, encryptedPassword, "/,READ;scope3,READ_UPDATE;"));
+            writer.write(credentialsAndAclAsString(USER_USER1, encryptedPassword, "prn::/,READ_UPDATE;prn::/scope:scope1,READ_UPDATE;prn::/scope:scope2,READ_UPDATE;"));
+            writer.write(credentialsAndAclAsString(USER_WITH_NO_ROOT_ACCESS, encryptedPassword, "prn::/scope:scope1,READ_UPDATE;prn::/scope:scope2,READ_UPDATE;"));
+            writer.write(credentialsAndAclAsString(USER_UNAUTHORIZED, encryptedPassword, "prn::/,READ_UPDATE;prn::/scope:scope1,READ_UPDATE;prn::/scope:scope2,READ_UPDATE;"));
+            writer.write(credentialsAndAclAsString(USER_ACCESS_TO_SUBSET_OF_SCOPES, encryptedPassword, "prn::/,READ;prn::/scope:scope3,READ_UPDATE;"));
             writer.write(credentialsAndAclAsString(USER_WITH_NO_AUTHORIZATIONS, encryptedPassword, ";"));
-            writer.write(credentialsAndAclAsString(USER_WITH_READ_UPDATE_ROOT, encryptedPassword, "scopeToDelete,READ_UPDATE;"));
-            writer.write(credentialsAndAclAsString(USER_ACCESS_TO_SCOPES_BUT_NOSTREAMS, encryptedPassword, "myscope,READ_UPDATE;"));
+            writer.write(credentialsAndAclAsString(USER_WITH_READ_UPDATE_ROOT, encryptedPassword, "prn::/scope:scopeToDelete,READ_UPDATE;"));
+            writer.write(credentialsAndAclAsString(USER_ACCESS_TO_SCOPES_BUT_NOSTREAMS, encryptedPassword, "prn::/scope:myscope,READ_UPDATE;"));
             writer.write(credentialsAndAclAsString(USER_ACCESS_TO_SCOPES_READ_ALLSTREAMS, encryptedPassword,
-                    "myscope,READ_UPDATE;myscope/*,READ;"));
+                    "prn::/scope:myscope,READ_UPDATE;prn::/scope:myscope/*,READ;"));
             writer.write(credentialsAndAclAsString(USER_ACCESS_TO_SCOPES_READUPDATE_ALLSTREAMS, encryptedPassword,
-                    "myscope,READ_UPDATE;myscope/*,READ_UPDATE;"));
+                    "prn::/scope:myscope,READ_UPDATE;prn::/scope:myscope/*,READ_UPDATE;"));
             writer.write(credentialsAndAclAsString(USER_ACCESS_TO_SCOPE_WRITE_SPECIFIC_STREAM, encryptedPassword,
-                    "myscope,READ_UPDATE;myscope/stream1,READ_UPDATE;"));
+                    "prn::/scope:myscope,READ_UPDATE;prn::/scope:myscope/stream:stream1,READ_UPDATE;"));
         }
 
         AuthHandlerManager authManager = new AuthHandlerManager(GRPCServerConfigImpl.builder()
@@ -186,7 +185,7 @@ public class StreamMetaDataAuthFocusedTests {
         mockControllerService = mock(ControllerService.class);
         serverConfig = RESTServerConfigImpl.builder().host("localhost").port(TestUtils.getAvailableListenPort()).build();
         LocalController controller = new LocalController(mockControllerService, false, "");
-        connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder()
+        connectionFactory = new SocketConnectionFactoryImpl(ClientConfig.builder()
                                                                   .controllerURI(URI.create("tcp://localhost"))
                                                                   .build());
         restServer = new RESTServer(controller, mockControllerService, authManager, serverConfig,

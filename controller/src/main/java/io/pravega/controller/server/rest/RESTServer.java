@@ -10,14 +10,14 @@
 package io.pravega.controller.server.rest;
 
 import com.google.common.util.concurrent.AbstractIdleService;
-import io.pravega.client.netty.impl.ConnectionFactory;
+import io.pravega.client.connection.impl.ConnectionFactory;
 import io.pravega.common.LoggerHelpers;
-import io.pravega.common.auth.JKSHelper;
+import io.pravega.common.security.JKSHelper;
 import io.pravega.controller.server.ControllerService;
 import io.pravega.controller.server.eventProcessor.LocalController;
 import io.pravega.controller.server.rest.resources.PingImpl;
 import io.pravega.controller.server.rest.resources.StreamMetadataResourceImpl;
-import io.pravega.controller.server.rpc.auth.AuthHandlerManager;
+import io.pravega.controller.server.security.auth.handler.AuthHandlerManager;
 import java.net.URI;
 import java.util.HashSet;
 import java.util.Set;

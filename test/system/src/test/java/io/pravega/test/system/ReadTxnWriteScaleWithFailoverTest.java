@@ -17,8 +17,8 @@ import io.pravega.client.admin.impl.StreamManagerImpl;
 import io.pravega.client.stream.ScalingPolicy;
 import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.client.stream.impl.ClientFactoryImpl;
-import io.pravega.client.stream.impl.ControllerImpl;
-import io.pravega.client.stream.impl.ControllerImplConfig;
+import io.pravega.client.control.impl.ControllerImpl;
+import io.pravega.client.control.impl.ControllerImplConfig;
 import io.pravega.client.stream.impl.StreamImpl;
 import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.ExecutorServiceHelpers;
@@ -93,7 +93,7 @@ public class ReadTxnWriteScaleWithFailoverTest extends AbstractFailoverTests {
         // Fetch all the RPC endpoints and construct the client URIs.
         final List<String> uris = conURIs.stream().filter(ISGRPC).map(URI::getAuthority).collect(Collectors.toList());
 
-        controllerURIDirect = URI.create("tcp://" + String.join(",", uris));
+        controllerURIDirect = URI.create((Utils.TLS_AND_AUTH_ENABLED ? TLS : TCP) + String.join(",", uris));
         log.info("Controller Service direct URI: {}", controllerURIDirect);
 
         // Verify segment store is running.
@@ -116,7 +116,7 @@ public class ReadTxnWriteScaleWithFailoverTest extends AbstractFailoverTests {
         streamManager = new StreamManagerImpl(clientConfig);
         createScopeAndStream(scope, stream, config, streamManager);
         log.info("Scope passed to client factory {}", scope);
-        clientFactory = new ClientFactoryImpl(scope, controller);
+        clientFactory = new ClientFactoryImpl(scope, controller, clientConfig);
         readerGroupManager = ReaderGroupManager.withScope(scope, clientConfig);
     }
 

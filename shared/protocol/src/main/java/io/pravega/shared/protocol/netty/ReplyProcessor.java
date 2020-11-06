@@ -85,4 +85,8 @@ public interface ReplyProcessor {
     void tableKeysRead(WireCommands.TableKeysRead tableKeysRead);
 
     void tableEntriesRead(WireCommands.TableEntriesRead tableEntriesRead);
+
+    void tableEntriesDeltaRead(WireCommands.TableEntriesDeltaRead tableEntriesDeltaRead);
+
+    void errorMessage(WireCommands.ErrorMessage errorMessage);
 }

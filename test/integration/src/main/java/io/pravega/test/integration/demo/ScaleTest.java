@@ -20,7 +20,7 @@ import io.pravega.client.stream.ScalingPolicy;
 import io.pravega.client.stream.Stream;
 import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.client.stream.Transaction;
-import io.pravega.client.stream.impl.Controller;
+import io.pravega.client.control.impl.Controller;
 import io.pravega.client.stream.impl.StreamImpl;
 import io.pravega.client.stream.impl.TxnSegments;
 
@@ -57,7 +57,8 @@ public class ScaleTest {
             TableStore tableStore = serviceBuilder.createTableStoreService();
             int port = Config.SERVICE_PORT;
             @Cleanup
-            PravegaConnectionListener server = new PravegaConnectionListener(false, port, store, tableStore);
+            PravegaConnectionListener server = new PravegaConnectionListener(false, port, store, tableStore,
+                    serviceBuilder.getLowPriorityExecutor());
             server.startListening();
 
             // Create controller object for testing against a separate controller report.

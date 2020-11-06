@@ -14,9 +14,9 @@ import io.pravega.client.ClientConfig;
 import io.pravega.client.EventStreamClientFactory;
 import io.pravega.client.admin.ReaderGroupManager;
 import io.pravega.client.admin.StreamManager;
-import io.pravega.client.netty.impl.ConnectionFactory;
-import io.pravega.client.netty.impl.ConnectionFactoryImpl;
-import io.pravega.client.netty.impl.ConnectionPoolImpl;
+import io.pravega.client.control.impl.Controller;
+import io.pravega.client.control.impl.ControllerImpl;
+import io.pravega.client.control.impl.ControllerImplConfig;
 import io.pravega.client.stream.EventStreamReader;
 import io.pravega.client.stream.EventStreamWriter;
 import io.pravega.client.stream.EventWriterConfig;
@@ -26,9 +26,7 @@ import io.pravega.client.stream.ScalingPolicy;
 import io.pravega.client.stream.Stream;
 import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.client.stream.impl.ClientFactoryImpl;
-import io.pravega.client.stream.impl.Controller;
-import io.pravega.client.stream.impl.ControllerImpl;
-import io.pravega.client.stream.impl.ControllerImplConfig;
+import io.pravega.common.concurrent.ExecutorServiceHelpers;
 import io.pravega.controller.util.Config;
 import io.pravega.segmentstore.contracts.StreamSegmentStore;
 import io.pravega.segmentstore.server.host.handler.PravegaConnectionListener;
@@ -39,6 +37,7 @@ import io.pravega.test.common.TestingServerStarter;
 import io.pravega.test.integration.demo.ControllerWrapper;
 import java.net.URI;
 import java.util.UUID;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.annotation.concurrent.NotThreadSafe;
 import lombok.Cleanup;
@@ -55,13 +54,14 @@ public final class SetupUtils {
     
     // The different services.
     @Getter
-    private ConnectionFactory connectionFactory = null;
+    private ScheduledExecutorService executor = null;
     @Getter
     private Controller controller = null;
     @Getter
     private EventStreamClientFactory clientFactory = null;
     private ControllerWrapper controllerWrapper = null;
     private PravegaConnectionListener server = null;
+    @Getter
     private TestingServer zkTestServer = null;
 
     // Manage the state of the class.
@@ -72,8 +72,9 @@ public final class SetupUtils {
     private final String scope = "scope";
     private final int controllerRPCPort = TestUtils.getAvailableListenPort();
     private final int controllerRESTPort = TestUtils.getAvailableListenPort();
+    @Getter
     private final int servicePort = TestUtils.getAvailableListenPort();
-    private final ClientConfig clientConfig = ClientConfig.builder().controllerURI(URI.create("tcp://localhost:" + String.valueOf(controllerRPCPort))).build();
+    private final ClientConfig clientConfig = ClientConfig.builder().controllerURI(URI.create("tcp://localhost:" + controllerRPCPort)).build();
     
     /**
      * Start all pravega related services required for the test deployment.
@@ -95,10 +96,10 @@ public final class SetupUtils {
             log.warn("Services already started, not attempting to start again");
             return;
         }
-        this.connectionFactory = new ConnectionFactoryImpl(clientConfig, new ConnectionPoolImpl(clientConfig), numThreads);
+        this.executor = ExecutorServiceHelpers.newScheduledThreadPool(2, "Controller pool");
         this.controller = new ControllerImpl(ControllerImplConfig.builder().clientConfig(clientConfig).build(),
-                                             connectionFactory.getInternalExecutor());
-        this.clientFactory = new ClientFactoryImpl(scope, controller, connectionFactory);
+                                             executor);
+        this.clientFactory = new ClientFactoryImpl(scope, controller, clientConfig);
         
         // Start zookeeper.
         this.zkTestServer = new TestingServerStarter().start();
@@ -109,7 +110,8 @@ public final class SetupUtils {
 
         serviceBuilder.initialize();
         StreamSegmentStore store = serviceBuilder.createStreamSegmentService();
-        this.server = new PravegaConnectionListener(false, servicePort, store, serviceBuilder.createTableStoreService());
+        this.server = new PravegaConnectionListener(false, servicePort, store, serviceBuilder.createTableStoreService(),
+                serviceBuilder.getLowPriorityExecutor());
         this.server.startListening();
         log.info("Started Pravega Service");
 
@@ -138,7 +140,7 @@ public final class SetupUtils {
         this.zkTestServer.close();
         this.clientFactory.close();
         this.controller.close();
-        this.connectionFactory.close();
+        this.executor.shutdown();
     }
 
     /**
@@ -147,10 +149,8 @@ public final class SetupUtils {
      * @param streamName     Name of the test stream.
      * @param numSegments    Number of segments to be created for this stream.
      *
-     * @throws Exception on any errors.
      */
-    public void createTestStream(final String streamName, final int numSegments)
-            throws Exception {
+    public void createTestStream(final String streamName, final int numSegments) {
         Preconditions.checkState(this.started.get(), "Services not yet started");
         Preconditions.checkNotNull(streamName);
         Preconditions.checkArgument(numSegments > 0);
@@ -207,6 +207,6 @@ public final class SetupUtils {
     }
     
     public URI getControllerRestUri() {
-        return URI.create("http://localhost:" + String.valueOf(controllerRESTPort));
+        return URI.create("http://localhost:" + controllerRESTPort);
     }
 }

@@ -10,6 +10,7 @@
 package io.pravega.segmentstore.contracts.tables;
 
 import io.pravega.segmentstore.contracts.Attributes;
+import io.pravega.segmentstore.contracts.SegmentType;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
@@ -50,6 +51,13 @@ public class TableAttributes extends Attributes {
      * {@link #TOTAL_ENTRY_COUNT}) of a Table Segment below which a Table Compaction is triggered.
      */
     public static final UUID MIN_UTILIZATION = new UUID(CORE_ATTRIBUTE_ID_PREFIX, TABLE_ATTRIBUTES_START_OFFSET + 5);
+
+    /**
+     * Defines an attribute that is used to indicate whether the Table Segment is Sorted (by Key) or not. This value
+     * cannot be changed after the Table Segment is created.
+     * TODO: deprecate in favor of {@link SegmentType#isSortedTableSegment()} (https://github.com/pravega/pravega/issues/5267).
+     */
+    public static final UUID SORTED = new UUID(CORE_ATTRIBUTE_ID_PREFIX, TABLE_ATTRIBUTES_START_OFFSET + 6);
 
     /**
      * Defines a Map that contains all Table Attributes along with their default values.

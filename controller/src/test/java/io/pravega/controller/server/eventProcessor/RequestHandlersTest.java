@@ -12,7 +12,8 @@ package io.pravega.controller.server.eventProcessor;
 import com.google.common.collect.Lists;
 import io.pravega.client.ClientConfig;
 import io.pravega.client.EventStreamClientFactory;
-import io.pravega.client.netty.impl.ConnectionFactoryImpl;
+import io.pravega.client.connection.impl.ConnectionFactory;
+import io.pravega.client.connection.impl.SocketConnectionFactoryImpl;
 import io.pravega.client.stream.ScalingPolicy;
 import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.common.Exceptions;
@@ -32,14 +33,14 @@ import io.pravega.controller.server.eventProcessor.requesthandlers.SealStreamTas
 import io.pravega.controller.server.eventProcessor.requesthandlers.StreamRequestHandler;
 import io.pravega.controller.server.eventProcessor.requesthandlers.TruncateStreamTask;
 import io.pravega.controller.server.eventProcessor.requesthandlers.UpdateStreamTask;
-import io.pravega.controller.server.rpc.auth.GrpcAuthHelper;
+import io.pravega.controller.server.security.auth.GrpcAuthHelper;
 import io.pravega.controller.store.stream.BucketStore;
 import io.pravega.controller.store.stream.State;
 import io.pravega.controller.store.stream.StoreException;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamStoreFactory;
-import io.pravega.controller.store.stream.Version;
-import io.pravega.controller.store.stream.VersionedMetadata;
+import io.pravega.controller.store.Version;
+import io.pravega.controller.store.VersionedMetadata;
 import io.pravega.controller.store.stream.VersionedTransactionData;
 import io.pravega.controller.store.stream.records.CommittingTransactionsRecord;
 import io.pravega.controller.store.stream.records.EpochRecord;
@@ -115,7 +116,7 @@ public abstract class RequestHandlersTest {
     private TestingServer zkServer;
 
     private EventStreamClientFactory clientFactory;
-    private ConnectionFactoryImpl connectionFactory;
+    private ConnectionFactory connectionFactory;
     private SegmentHelper segmentHelper;
     @Before
     public void setup() throws Exception {
@@ -143,7 +144,7 @@ public abstract class RequestHandlersTest {
 
         taskMetadataStore = TaskStoreFactory.createZKStore(zkClient, executor);
         
-        connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder().build());
+        connectionFactory = new SocketConnectionFactoryImpl(ClientConfig.builder().build());
         segmentHelper = SegmentHelperMock.getSegmentHelperMock();
         clientFactory = mock(EventStreamClientFactory.class);
         streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, taskMetadataStore, segmentHelper,
@@ -248,7 +249,7 @@ public abstract class RequestHandlersTest {
         }
 
         verify(streamStore1Spied, times(invocationCount.get("startCommitTransactions")))
-                .startCommitTransactions(anyString(), anyString(), any(), any());
+                .startCommitTransactions(anyString(), anyString(), anyInt(), any(), any());
         verify(streamStore1Spied, times(invocationCount.get("completeCommitTransactions")))
                 .completeCommitTransactions(anyString(), anyString(), any(), any(), any());
         verify(streamStore1Spied, times(invocationCount.get("updateVersionedState")))
@@ -353,7 +354,7 @@ public abstract class RequestHandlersTest {
         if (expectFailureOnFirstJob) {
             AssertExtensions.assertSuppliedFutureThrows("first commit should fail", () -> future1Rolling, firstExceptionPredicate);
             verify(streamStore1Spied, times(invocationCount.get("startCommitTransactions")))
-                    .startCommitTransactions(anyString(), anyString(), any(), any());
+                    .startCommitTransactions(anyString(), anyString(), anyInt(), any(), any());
             verify(streamStore1Spied, times(invocationCount.get("startRollingTxn"))).startRollingTxn(anyString(), anyString(), anyInt(), any(), any(), any());
             verify(streamStore1Spied, times(invocationCount.get("rollingTxnCreateDuplicateEpochs")))
                     .rollingTxnCreateDuplicateEpochs(anyString(), anyString(), any(), anyLong(), any(), any(), any());
@@ -381,9 +382,9 @@ public abstract class RequestHandlersTest {
                 doAnswer(x -> {
                     signal.complete(null);
                     waitOn.join();
-                    return store.startCommitTransactions(x.getArgument(0), x.getArgument(1),
-                            x.getArgument(2), x.getArgument(3));
-                }).when(spied).startCommitTransactions(anyString(), anyString(), any(), any());
+                    return store.startCommitTransactions(x.getArgument(0), x.getArgument(1), 
+                            x.getArgument(2), x.getArgument(3), x.getArgument(4));
+                }).when(spied).startCommitTransactions(anyString(), anyString(), anyInt(), any(), any());
                 break;
             case "completeCommitTransactions":
                 doAnswer(x -> {
@@ -819,7 +820,7 @@ public abstract class RequestHandlersTest {
         doAnswer(x -> Futures.failedFuture(new RuntimeException()))
                 .when(segmentHelper).commitTransaction(anyString(), anyString(), anyLong(), anyLong(), any(), anyString());
         
-        streamStore.startCommitTransactions(fairness, fairness, null, executor).join();
+        streamStore.startCommitTransactions(fairness, fairness, 100, null, executor).join();
         
         // 2. start process --> this should fail with a retryable exception while talking to segment store!
         streamStore.setState(fairness, fairness, State.COMMITTING_TXN, null, executor).join();

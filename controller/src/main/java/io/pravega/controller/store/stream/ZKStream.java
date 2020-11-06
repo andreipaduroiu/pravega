@@ -11,11 +11,15 @@ package io.pravega.controller.store.stream;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.common.util.BitConverter;
+import io.pravega.controller.store.Version;
+import io.pravega.controller.store.VersionedMetadata;
+import io.pravega.controller.store.ZKStoreHelper;
 import io.pravega.controller.store.stream.records.ActiveTxnRecord;
 import io.pravega.controller.store.stream.records.HistoryTimeSeries;
 import io.pravega.controller.store.stream.records.CommittingTransactionsRecord;
@@ -29,6 +33,8 @@ import io.pravega.controller.store.stream.records.StreamConfigurationRecord;
 import io.pravega.controller.store.stream.records.StreamCutRecord;
 import io.pravega.controller.store.stream.records.StreamTruncationRecord;
 import io.pravega.controller.store.stream.records.WriterMark;
+import io.pravega.controller.store.stream.records.StreamSubscriber;
+import io.pravega.controller.store.stream.records.SubscriberSet;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -68,6 +74,7 @@ class ZKStream extends PersistentStreamBase {
     private static final String CREATION_TIME_PATH = STREAM_PATH + "/creationTime";
     private static final String CONFIGURATION_PATH = STREAM_PATH + "/configuration";
     private static final String TRUNCATION_PATH = STREAM_PATH + "/truncation";
+    private static final String SUBSCRIBERS_PATH = STREAM_PATH + "/subscribers";
     private static final String STATE_PATH = STREAM_PATH + "/state";
     private static final String EPOCH_TRANSITION_PATH = STREAM_PATH + "/epochTransition";
     private static final String RETENTION_SET_PATH = STREAM_PATH + "/retention";
@@ -91,6 +98,7 @@ class ZKStream extends PersistentStreamBase {
     private final String creationPath;
     private final String configurationPath;
     private final String truncationPath;
+    private final String subscribersPath;
     private final String statePath;
     private final String epochTransitionPath;
     private final String committingTxnsPath;
@@ -141,6 +149,7 @@ class ZKStream extends PersistentStreamBase {
         creationPath = String.format(CREATION_TIME_PATH, scopeName, streamName);
         configurationPath = String.format(CONFIGURATION_PATH, scopeName, streamName);
         truncationPath = String.format(TRUNCATION_PATH, scopeName, streamName);
+        subscribersPath = String.format(SUBSCRIBERS_PATH, scopeName, streamName);
         statePath = String.format(STATE_PATH, scopeName, streamName);
         retentionSetPath = String.format(RETENTION_SET_PATH, scopeName, streamName);
         retentionStreamCutRecordPathFormat = String.format(RETENTION_STREAM_CUT_RECORD_PATH, scopeName, streamName) + "/%d";
@@ -234,7 +243,32 @@ class ZKStream extends PersistentStreamBase {
         return getId().thenCompose(id -> store.getCachedData(creationPath, id, x -> BitConverter.readLong(x, 0))
                 .thenApply(VersionedMetadata::getObject));
     }
-    
+
+    @Override
+    public CompletableFuture<Void> createSubscriber(String subscriber) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public CompletableFuture<VersionedMetadata<StreamSubscriber>> getSubscriberRecord(String subscriber) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public CompletableFuture<List<String>> listSubscribers() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public CompletableFuture<Version> setSubscriberData(final VersionedMetadata<StreamSubscriber> subscriber) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public CompletableFuture<Void> removeSubscriber(String subscriber) {
+        throw new UnsupportedOperationException();
+    }
+
     @Override
     CompletableFuture<Void> createRetentionSetDataIfAbsent(RetentionSet data) {
         return Futures.toVoid(store.createZNodeIfNotExist(retentionSetPath, data.toBytes()));
@@ -244,6 +278,7 @@ class ZKStream extends PersistentStreamBase {
     CompletableFuture<VersionedMetadata<RetentionSet>> getRetentionSetData() {
         return store.getData(retentionSetPath, RetentionSet::fromBytes);
     }
+
 
     @Override
     CompletableFuture<Version> updateRetentionSetData(VersionedMetadata<RetentionSet> retention) {
@@ -411,6 +446,12 @@ class ZKStream extends PersistentStreamBase {
     }
 
     @Override
+    CompletableFuture<Void> createSubscribersRecordIfAbsent() {
+        SubscriberSet subscribersSetRecord = new SubscriberSet(ImmutableList.of());
+        return Futures.toVoid(store.createZNodeIfNotExist(subscribersPath, subscribersSetRecord.toBytes()));
+    }
+
+    @Override
     public CompletableFuture<Void> createMarkerData(long segmentId, long timestamp) {
         final String path = ZKPaths.makePath(markerPath, String.format("%d", segmentId));
         byte[] b = new byte[Long.BYTES];
@@ -487,8 +528,8 @@ class ZKStream extends PersistentStreamBase {
     }
 
     @Override
-    public CompletableFuture<List<Map.Entry<UUID, ActiveTxnRecord>>> getOrderedCommittingTxnInLowestEpoch() {
-        return super.getOrderedCommittingTxnInLowestEpochHelper(txnCommitOrderer, executor);
+    public CompletableFuture<List<Map.Entry<UUID, ActiveTxnRecord>>> getOrderedCommittingTxnInLowestEpoch(int limit) {
+        return super.getOrderedCommittingTxnInLowestEpochHelper(txnCommitOrderer, limit, executor);
     }
 
     @Override
@@ -657,19 +698,19 @@ class ZKStream extends PersistentStreamBase {
     }
 
     @Override
-    CompletableFuture<Void> createWaitingRequestNodeIfAbsent(String waitingRequestProcessor) {
+    public CompletableFuture<Void> createWaitingRequestNodeIfAbsent(String waitingRequestProcessor) {
         return Futures.toVoid(store.createZNodeIfNotExist(waitingRequestProcessorPath, 
                 waitingRequestProcessor.getBytes(StandardCharsets.UTF_8)));
     }
 
     @Override
-    CompletableFuture<String> getWaitingRequestNode() {
+    public CompletableFuture<String> getWaitingRequestNode() {
         return store.getData(waitingRequestProcessorPath, x -> StandardCharsets.UTF_8.decode(ByteBuffer.wrap(x)).toString())
                 .thenApply(VersionedMetadata::getObject);
     }
 
     @Override
-    CompletableFuture<Void> deleteWaitingRequestNode() {
+    public CompletableFuture<Void> deleteWaitingRequestNode() {
         return store.deletePath(waitingRequestProcessorPath, false);
     }
 

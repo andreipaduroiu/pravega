@@ -11,8 +11,9 @@ package io.pravega.segmentstore.storage.impl.bookkeeper;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
-import io.pravega.common.auth.JKSHelper;
-import io.pravega.common.auth.ZKTLSUtils;
+import io.pravega.common.io.filesystem.FileOperations;
+import io.pravega.common.security.JKSHelper;
+import io.pravega.common.security.ZKTLSUtils;
 import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
@@ -30,7 +31,6 @@ import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.proto.BookieServer;
 import org.apache.bookkeeper.util.IOUtils;
 import org.apache.bookkeeper.zookeeper.ZooKeeperClient;
-import org.apache.commons.io.FileUtils;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.ZooDefs;
 
@@ -109,6 +109,7 @@ public class BookKeeperServiceRunner implements AutoCloseable {
         Preconditions.checkState(this.servers.get(0) != null, "Bookie already stopped.");
         val bk = this.servers.get(bookieIndex);
         bk.shutdown();
+        log.info("Bookie {} is stopping.", bookieIndex);
         this.servers.set(bookieIndex, null);
         log.info("Bookie {} stopped.", bookieIndex);
     }
@@ -122,8 +123,9 @@ public class BookKeeperServiceRunner implements AutoCloseable {
     public void startBookie(int bookieIndex) throws Exception {
         Preconditions.checkState(this.servers.size() > 0, "No Bookies initialized. Call startAll().");
         Preconditions.checkState(this.servers.get(0) == null, "Bookie already running.");
+        log.info("Bookie {} is starting.", bookieIndex);
         this.servers.set(bookieIndex, runBookie(this.bookiePorts.get(bookieIndex)));
-        log.info("Bookie {} stopped.", bookieIndex);
+        log.info("Bookie {} started.", bookieIndex);
     }
 
     /**
@@ -250,18 +252,9 @@ public class BookKeeperServiceRunner implements AutoCloseable {
         }
     }
 
-    private void cleanupDirectories() throws IOException {
-        cleanupDirectories(this.ledgerDirs);
-        cleanupDirectories(this.journalDirs);
-    }
-
-    private void cleanupDirectories(HashMap<?, File> toDelete) throws IOException {
-        for (File dir : toDelete.values()) {
-            log.info("Cleaning up " + dir);
-            FileUtils.deleteDirectory(dir);
-        }
-
-        toDelete.clear();
+    private void cleanupDirectories() {
+        FileOperations.cleanupDirectories(this.ledgerDirs);
+        FileOperations.cleanupDirectories(this.journalDirs);
     }
 
     //endregion

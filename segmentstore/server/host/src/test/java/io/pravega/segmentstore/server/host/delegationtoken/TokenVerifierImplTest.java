@@ -13,7 +13,6 @@ import io.pravega.auth.InvalidClaimException;
 import io.pravega.auth.InvalidTokenException;
 import io.pravega.auth.TokenException;
 import io.pravega.auth.TokenExpiredException;
-import io.pravega.segmentstore.server.host.stat.AutoScalerConfig;
 import io.pravega.shared.security.token.JsonWebToken;
 
 import java.util.Arrays;
@@ -30,45 +29,37 @@ import static io.pravega.test.common.AssertExtensions.assertThrows;
 public class TokenVerifierImplTest {
 
     @Test
-    public void testTokenVerificationSucceedsWhenAuthIsDisabled() throws TokenException {
-        DelegationTokenVerifier tokenVerifier = prepareTokenVerifier(false);
-
-        // No exception is expected here.
-        tokenVerifier.verifyToken("xyz", null, READ);
-    }
-
-    @Test
     public void testTokenVerificationFailsWhenTokenIsNull() {
-        DelegationTokenVerifier tokenVerifier = prepareTokenVerifier(true);
+        DelegationTokenVerifier tokenVerifier = new TokenVerifierImpl("secret");
 
         assertThrows(InvalidTokenException.class,
-                () -> tokenVerifier.verifyToken("xyz", null, READ)
+                () -> tokenVerifier.verifyToken("dummy", null, READ)
         );
     }
 
     @Test
     public void testTokenVerificationFailsWhenTokenIsExpired() {
-        DelegationTokenVerifier tokenVerifier = prepareTokenVerifier(true);
-        String tokenWithExpiry = prepareJwt("*, READ_UPDATE", 0);
+        DelegationTokenVerifier tokenVerifier = new TokenVerifierImpl("secret");
+        String tokenWithExpiry = prepareJwt("prn::*, READ_UPDATE", 0);
 
         assertThrows(TokenExpiredException.class,
-                () -> tokenVerifier.verifyToken("xyz", tokenWithExpiry, READ)
+                () -> tokenVerifier.verifyToken("dummy/resource", tokenWithExpiry, READ)
         );
     }
 
     @Test
     public void testTokenVerificationSucceedsWhenTokenIsNotExpired() throws TokenException {
-        DelegationTokenVerifier tokenVerifier = prepareTokenVerifier(true);
-        String tokenWithExpiry = prepareJwt("*, READ_UPDATE", Integer.MAX_VALUE);
+        DelegationTokenVerifier tokenVerifier = new TokenVerifierImpl("secret");
+        String tokenWithExpiry = prepareJwt("prn::*, READ_UPDATE", Integer.MAX_VALUE);
 
         // No exception is expected here.
-        tokenVerifier.verifyToken("s1", tokenWithExpiry, READ_UPDATE);
+        tokenVerifier.verifyToken("dummy/resource", tokenWithExpiry, READ_UPDATE);
     }
 
     @Test
     public void testTokenVerificationFailsWhenTokenDoesNotContainMatchingResource() {
-        DelegationTokenVerifier tokenVerifier = prepareTokenVerifier(true);
-        String tokenWithClaim = prepareJwt("abc, READ_UPDATE", Integer.MAX_VALUE);
+        DelegationTokenVerifier tokenVerifier = new TokenVerifierImpl("secret");
+        String tokenWithClaim = prepareJwt("prn::/scope:abc, READ_UPDATE", Integer.MAX_VALUE);
 
         assertThrows(InvalidClaimException.class,
                 () -> tokenVerifier.verifyToken("xyz", tokenWithClaim, READ)
@@ -77,8 +68,8 @@ public class TokenVerifierImplTest {
 
     @Test
     public void testTokenVerificationFailsWhenTokenDoesNotContainMatchingPermission() {
-        DelegationTokenVerifier tokenVerifier = prepareTokenVerifier(true);
-        String tokenWithClaim = prepareJwt("abc, READ", Integer.MAX_VALUE);
+        DelegationTokenVerifier tokenVerifier = new TokenVerifierImpl("secret");
+        String tokenWithClaim = prepareJwt("prn::/scope:abc, READ", Integer.MAX_VALUE);
 
         assertThrows(InvalidClaimException.class,
                 () -> tokenVerifier.verifyToken("abc", tokenWithClaim, READ_UPDATE)
@@ -87,20 +78,20 @@ public class TokenVerifierImplTest {
 
     @Test
     public void testTokenVerificationSucceedsWhenTokenContainsMatchingClaim() throws TokenException {
-        DelegationTokenVerifier tokenVerifier = prepareTokenVerifier(true);
+        DelegationTokenVerifier tokenVerifier = new TokenVerifierImpl("secret");
 
-        String tokenWithWildcardClaim = prepareJwt("*, READ_UPDATE", Integer.MAX_VALUE);
+        String tokenWithWildcardClaim = prepareJwt("prn::*, READ_UPDATE", Integer.MAX_VALUE);
         tokenVerifier.verifyToken("xyz", tokenWithWildcardClaim, READ);
 
-        String tokenWithSpecificClaim = prepareJwt("abc, READ_UPDATE", Integer.MAX_VALUE);
+        String tokenWithSpecificClaim = prepareJwt("prn::/scope:abc, READ_UPDATE", Integer.MAX_VALUE);
         tokenVerifier.verifyToken("abc", tokenWithSpecificClaim, READ);
     }
 
     @Test
     public void testTokenVerificationSuceedsForInternalSegments() throws TokenException {
-        DelegationTokenVerifier tokenVerifier = prepareTokenVerifier(true);
+        DelegationTokenVerifier tokenVerifier = new TokenVerifierImpl("secret");
 
-        String token = prepareJwt("_system/_requeststream, READ_UPDATE", null);
+        String token = prepareJwt("prn::/scope:_system/stream:_requeststream, READ_UPDATE", null);
         tokenVerifier.verifyToken("_system/_requeststream/0.#epoch.0", token, READ);
     }
 
@@ -117,15 +108,7 @@ public class TokenVerifierImplTest {
             permissionsByResource.put(resource, permission);
         }
         JsonWebToken token = new JsonWebToken("segmentstoreresource",
-                "segmentstore", "secret".getBytes(), ttlInSeconds, permissionsByResource);
+                "segmentstore", "secret".getBytes(), permissionsByResource, ttlInSeconds);
         return token.toCompactString();
-    }
-
-    private DelegationTokenVerifier prepareTokenVerifier(boolean isAuthEnabled) {
-        AutoScalerConfig config = AutoScalerConfig.builder()
-                .with(AutoScalerConfig.AUTH_ENABLED, isAuthEnabled)
-                .with(AutoScalerConfig.TOKEN_SIGNING_KEY, "secret")
-                .build();
-        return new TokenVerifierImpl(config);
     }
 }

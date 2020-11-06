@@ -13,7 +13,7 @@ import io.pravega.client.segment.impl.Segment;
 import io.pravega.client.stream.ScalingPolicy;
 import io.pravega.client.stream.Stream;
 import io.pravega.client.stream.StreamConfiguration;
-import io.pravega.client.stream.impl.Controller;
+import io.pravega.client.control.impl.Controller;
 import io.pravega.client.stream.impl.StreamImpl;
 import io.pravega.segmentstore.contracts.StreamSegmentStore;
 import io.pravega.segmentstore.contracts.tables.TableStore;
@@ -48,7 +48,8 @@ public class StreamMetadataTest {
         TableStore tableStore = serviceBuilder.createTableStoreService();
 
         @Cleanup
-        PravegaConnectionListener server = new PravegaConnectionListener(false, servicePort, store, tableStore);
+        PravegaConnectionListener server = new PravegaConnectionListener(false, servicePort, store, tableStore,
+                serviceBuilder.getLowPriorityExecutor());
         server.startListening();
         int controllerPort = TestUtils.getAvailableListenPort();
         @Cleanup

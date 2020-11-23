@@ -10,7 +10,7 @@
 package io.pravega.segmentstore.server.reading;
 
 import com.google.common.base.Preconditions;
-import javax.annotation.concurrent.GuardedBy;
+import java.util.concurrent.atomic.AtomicInteger;
 import lombok.Getter;
 
 /**
@@ -19,8 +19,7 @@ import lombok.Getter;
 public class CacheIndexEntry extends ReadIndexEntry {
     @Getter
     private final int cacheAddress;
-    @GuardedBy("this")
-    private int length;
+    private final AtomicInteger length;
 
     /**
      * Creates a new instance of the ReadIndexEntry class.
@@ -34,13 +33,13 @@ public class CacheIndexEntry extends ReadIndexEntry {
     CacheIndexEntry(long streamSegmentOffset, int length, int cacheAddress) {
         super(streamSegmentOffset);
         Preconditions.checkArgument(length >= 0, "length", "length must be a non-negative number.");
-        this.length = length;
+        this.length = new AtomicInteger(length);
         this.cacheAddress = cacheAddress;
     }
 
     @Override
-    synchronized long getLength() {
-        return this.length;
+    long getLength() {
+        return this.length.get();
     }
 
     /**
@@ -48,9 +47,9 @@ public class CacheIndexEntry extends ReadIndexEntry {
      *
      * @param delta The amount to increase by.
      */
-    synchronized void increaseLength(int delta) {
+    void increaseLength(int delta) {
         Preconditions.checkArgument(delta >= 0, "delta must be a non-negative number.");
-        this.length += delta;
+        this.length.addAndGet(delta);
     }
 
     @Override

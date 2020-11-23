@@ -40,9 +40,9 @@ class DirectMemoryBuffer implements AutoCloseable {
     private final CacheLayout layout;
     private final ByteBufAllocator allocator;
     @GuardedBy("this")
-    private ByteBuf buf;
+    private volatile ByteBuf buf;
     @GuardedBy("this")
-    private int usedBlockCount;
+    private volatile int usedBlockCount;
 
     //endregion
 
@@ -88,7 +88,7 @@ class DirectMemoryBuffer implements AutoCloseable {
      *
      * @return The number of used blocks.
      */
-    synchronized int getUsedBlockCount() {
+    int getUsedBlockCount() {
         return this.usedBlockCount;
     }
 
@@ -97,7 +97,7 @@ class DirectMemoryBuffer implements AutoCloseable {
      *
      * @return The result.
      */
-    synchronized boolean isAllocated() {
+    boolean isAllocated() {
         return this.buf != null;
     }
 
@@ -107,12 +107,12 @@ class DirectMemoryBuffer implements AutoCloseable {
      *
      * @return True if at least one block is free, false otherwise.
      */
-    synchronized boolean hasCapacity() {
+    boolean hasCapacity() {
         return this.usedBlockCount > 0 && this.usedBlockCount < this.layout.blocksPerBuffer();
     }
 
     @Override
-    public synchronized String toString() {
+    public String toString() {
         return String.format("Id=%d, UsedBlockCount=%d", this.id, this.usedBlockCount);
     }
 

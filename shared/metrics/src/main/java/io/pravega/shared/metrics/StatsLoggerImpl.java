@@ -10,16 +10,11 @@
 package io.pravega.shared.metrics;
 
 import com.google.common.base.Preconditions;
-
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Supplier;
-
-import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Meter.Id;
+import io.micrometer.core.instrument.MeterRegistry;
+import java.util.function.Supplier;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-
-import javax.annotation.concurrent.GuardedBy;
 
 import static io.pravega.shared.metrics.NullStatsLogger.NULLCOUNTER;
 import static io.pravega.shared.metrics.NullStatsLogger.NULLGAUGE;
@@ -80,8 +75,7 @@ public class StatsLoggerImpl implements StatsLogger {
     }
 
     private class CounterImpl implements Counter {
-        @GuardedBy("this")
-        private io.micrometer.core.instrument.Counter counter;
+        private volatile io.micrometer.core.instrument.Counter counter;
         private final io.micrometer.core.instrument.Tags tags;
         @Getter
         private final Id id;
@@ -106,17 +100,17 @@ public class StatsLoggerImpl implements StatsLogger {
         }
 
         @Override
-        public synchronized long get() {
+        public long get() {
             return (long) counter.count();
         }
 
         @Override
-        public synchronized void inc() {
+        public void inc() {
             counter.increment();
         }
 
         @Override
-        public synchronized void add(long delta) {
+        public void add(long delta) {
             counter.increment(delta);
         }
     }
@@ -124,23 +118,23 @@ public class StatsLoggerImpl implements StatsLogger {
     private class GaugeImpl<T extends Number> implements Gauge {
         @Getter
         private final Id id;
-        private final AtomicReference<Supplier<Number>> supplierReference = new AtomicReference<>();
+        private volatile Supplier<Number> supplierReference;
 
         GaugeImpl(String statName, Supplier<Number> valueSupplier, String... tagPairs) {
             io.micrometer.core.instrument.Tags tags = io.micrometer.core.instrument.Tags.of(tagPairs);
             this.id = new Id(statName, tags, null, null, io.micrometer.core.instrument.Meter.Type.GAUGE);
-            this.supplierReference.set(valueSupplier);
-            metrics.gauge(statName, tags, this.supplierReference, obj -> obj.get().get().doubleValue());
+            this.supplierReference = valueSupplier;
+            metrics.gauge(statName, tags, this.supplierReference, obj -> obj.get().doubleValue());
         }
 
         @Override
         public void setSupplier(Supplier<Number> supplier) {
-            supplierReference.set(Preconditions.checkNotNull(supplier));
+            supplierReference = Preconditions.checkNotNull(supplier);
         }
 
         @Override
         public Supplier<Number> getSupplier() {
-            return supplierReference.get();
+            return supplierReference;
         }
 
         @Override

@@ -11,7 +11,6 @@ package io.pravega.segmentstore.server.reading;
 
 import com.google.common.base.Preconditions;
 import io.pravega.common.util.SortedIndex;
-import javax.annotation.concurrent.GuardedBy;
 
 /**
  * An entry in the Read Index with data at a particular offset.
@@ -20,8 +19,7 @@ abstract class ReadIndexEntry implements SortedIndex.IndexEntry {
     //region Members
 
     private final long streamSegmentOffset;
-    @GuardedBy("this")
-    private int generation;
+    private volatile int generation;
 
     //endregion
 
@@ -48,7 +46,7 @@ abstract class ReadIndexEntry implements SortedIndex.IndexEntry {
      *
      * @return The entry's generation.
      */
-    synchronized int getGeneration() {
+    int getGeneration() {
         return this.generation;
     }
 
@@ -57,7 +55,7 @@ abstract class ReadIndexEntry implements SortedIndex.IndexEntry {
      *
      * @param generation The current generation.
      */
-    synchronized void setGeneration(int generation) {
+    void setGeneration(int generation) {
         this.generation = generation;
     }
 

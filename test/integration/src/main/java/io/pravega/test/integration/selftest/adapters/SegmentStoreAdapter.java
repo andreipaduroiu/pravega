@@ -262,7 +262,8 @@ class SegmentStoreAdapter extends StoreAdapter {
     @Override
     public CompletableFuture<Void> createTable(String tableName, Duration timeout) {
         ensureRunning();
-        return this.tableStore.createSegment(tableName, SegmentType.TABLE_SEGMENT_HASH, timeout);
+        //return this.tableStore.createSegment(tableName, SegmentType.TABLE_SEGMENT_HASH, timeout);
+        return this.tableStore.createSegment(tableName, SegmentType.TABLE_SEGMENT_SORTED, timeout);
     }
 
     @Override

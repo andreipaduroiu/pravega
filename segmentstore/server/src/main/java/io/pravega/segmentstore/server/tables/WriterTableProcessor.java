@@ -12,6 +12,7 @@ package io.pravega.segmentstore.server.tables;
 import com.google.common.base.Preconditions;
 import io.pravega.common.Exceptions;
 import io.pravega.common.TimeoutTimer;
+import io.pravega.common.Timer;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.common.io.SerializationException;
 import io.pravega.common.util.BufferView;
@@ -32,6 +33,7 @@ import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import javax.annotation.concurrent.GuardedBy;
@@ -267,6 +269,15 @@ public class WriterTableProcessor implements WriterSegmentProcessor {
         this.connector.notifyIndexOffsetChanged(this.aggregator.getLastIndexedOffset(), flushResult.processedBytes);
     }
 
+    // TODO: remove all this once debugging is done.
+    private final AtomicInteger flushCount = new AtomicInteger();
+    private final AtomicLong flushKeyCount = new AtomicLong();
+    private final AtomicLong readKeysElapsed = new AtomicLong();
+    private final AtomicLong groupByBucketElapsed = new AtomicLong();
+    private final AtomicLong fetchExistingKeysElapsed = new AtomicLong();
+    private final AtomicLong sortedIndexPersistElapsed = new AtomicLong();
+    private final AtomicLong indexUpdateElapsed = new AtomicLong();
+
     /**
      * Performs a single flush attempt.
      *
@@ -280,7 +291,10 @@ public class WriterTableProcessor implements WriterSegmentProcessor {
      */
     private CompletableFuture<TableWriterFlushResult> flushOnce(DirectSegmentAccess segment, TimeoutTimer timer) {
         // Index all the keys in the segment range pointed to by the aggregator.
+        val t = new Timer();
         KeyUpdateCollection keyUpdates = readKeysFromSegment(segment, this.aggregator.getFirstOffset(), this.aggregator.getLastOffset(), timer);
+        val readKeys = t.getElapsedNanos();
+
         log.debug("{}: Flush.ReadFromSegment KeyCount={}, UpdateCount={}, HighestCopiedOffset={}, LastIndexedOffset={}.", this.traceObjectId,
                 keyUpdates.getUpdates().size(), keyUpdates.getTotalUpdateCount(), keyUpdates.getHighestCopiedOffset(), keyUpdates.getLastIndexedOffset());
 
@@ -288,17 +302,37 @@ public class WriterTableProcessor implements WriterSegmentProcessor {
         // for each such bucket and finally (reindex) update the bucket.
         return this.indexWriter
                 .groupByBucket(segment, keyUpdates.getUpdates(), timer)
-                .thenComposeAsync(builders -> fetchExistingKeys(builders, segment, timer)
-                                .thenComposeAsync(v -> {
-                                    val bucketUpdates = builders.stream().map(BucketUpdate.Builder::build).collect(Collectors.toList());
-                                    logBucketUpdates(bucketUpdates);
-                                    return this.connector.getSortedKeyIndex().persistUpdate(bucketUpdates, timer.getRemaining())
-                                            .thenComposeAsync(v2 ->
-                                                            this.indexWriter.updateBuckets(segment, bucketUpdates,
+                .thenComposeAsync(builders -> {
+                            val groupByBucket = t.getElapsedNanos();
+                            return fetchExistingKeys(builders, segment, timer)
+                                    .thenComposeAsync(v -> {
+                                        val fetchExisting = t.getElapsedNanos();
+                                        val bucketUpdates = builders.stream().map(BucketUpdate.Builder::build).collect(Collectors.toList());
+                                        logBucketUpdates(bucketUpdates);
+                                        return this.connector.getSortedKeyIndex().persistUpdate(bucketUpdates, timer.getRemaining())
+                                                .thenComposeAsync(v2 -> {
+                                                            val sortedIndexPersist = t.getElapsedNanos();
+                                                            return this.indexWriter.updateBuckets(segment, bucketUpdates,
                                                                     this.aggregator.getLastIndexedOffset(), keyUpdates.getLastIndexedOffset(),
-                                                                    keyUpdates.getTotalUpdateCount(), timer.getRemaining()),
-                                                    this.executor);
-                                }, this.executor),
+                                                                    keyUpdates.getTotalUpdateCount(), timer.getRemaining())
+                                                                    .thenApply(r -> {
+                                                                        val indexUpdate = t.getElapsedNanos();
+                                                                        flushKeyCount.addAndGet(keyUpdates.getTotalUpdateCount());
+                                                                        readKeysElapsed.addAndGet(readKeys);
+                                                                        groupByBucketElapsed.addAndGet(groupByBucket - readKeys);
+                                                                        fetchExistingKeysElapsed.addAndGet(fetchExisting - groupByBucket);
+                                                                        sortedIndexPersistElapsed.addAndGet(sortedIndexPersist - fetchExisting);
+                                                                        indexUpdateElapsed.addAndGet(indexUpdate - sortedIndexPersist);
+                                                                        if (flushCount.incrementAndGet() % 10 == 0) {
+                                                                            System.out.println(String.format("%s: FlushCount=%s, TotalKeyCount=%s, ReadKeysElapsed=%s, GroupByBucketElapsed=%s, FetchExistingKeysElapsed=%s, SortedIndexPersistElapsed=%s, IndexUpdateElapsed=%s",
+                                                                                    this.traceObjectId, flushCount, flushKeyCount, readKeysElapsed.get() / 1000_000, groupByBucketElapsed.get() / 1000_000, fetchExistingKeysElapsed.get() / 1000_000, sortedIndexPersistElapsed.get() / 1000_000, indexUpdateElapsed.get() / 1000_000));
+                                                                        }
+                                                                        return r;
+                                                                    });
+                                                        },
+                                                        this.executor);
+                                    }, this.executor);
+                        },
                         this.executor)
                 .thenApply(updateCount -> new TableWriterFlushResult(keyUpdates, updateCount));
     }
@@ -410,8 +444,14 @@ public class WriterTableProcessor implements WriterSegmentProcessor {
     private CompletableFuture<Void> fetchExistingKeys(Collection<BucketUpdate.Builder> builders, DirectSegmentAccess segment,
                                                       TimeoutTimer timer) {
         Exceptions.checkNotClosed(this.closed.get(), this);
+
+        // We only need to do this for those buckets we know exist.
+        // TODO: investigate doing this in parallel (without killing the whole process).
+        val existingBuilders = builders.stream()
+                .filter(b -> b.getBucket().exists())
+                .collect(Collectors.toList());
         return Futures.loop(
-                builders,
+                existingBuilders,
                 bucketUpdate -> fetchExistingKeys(bucketUpdate, segment, timer).thenApply(v -> true),
                 this.executor);
     }

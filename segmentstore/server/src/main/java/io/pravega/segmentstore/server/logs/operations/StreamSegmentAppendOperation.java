@@ -14,6 +14,7 @@ import io.pravega.common.io.serialization.RevisionDataInput;
 import io.pravega.common.io.serialization.RevisionDataOutput;
 import io.pravega.common.util.BufferView;
 import io.pravega.common.util.ByteArraySegment;
+import io.pravega.segmentstore.contracts.AttributeId;
 import io.pravega.segmentstore.contracts.AttributeUpdate;
 import io.pravega.segmentstore.contracts.AttributeUpdateType;
 import java.io.IOException;
@@ -139,7 +140,7 @@ public class StreamSegmentAppendOperation extends StorageOperation implements At
 
     static class Serializer extends OperationSerializer<StreamSegmentAppendOperation> {
         private static final int STATIC_LENGTH = 3 * Long.BYTES;
-        private static final int ATTRIBUTE_UPDATE_LENGTH = RevisionDataOutput.UUID_BYTES + Byte.BYTES + 2 * Long.BYTES;
+        private static final int ATTRIBUTE_UPDATE_LENGTH = 2 * Long.BYTES + Byte.BYTES + 2 * Long.BYTES;
 
         @Override
         protected OperationBuilder<StreamSegmentAppendOperation> newBuilder() {
@@ -182,7 +183,8 @@ public class StreamSegmentAppendOperation extends StorageOperation implements At
         }
 
         private void writeAttributeUpdate00(RevisionDataOutput target, AttributeUpdate au) throws IOException {
-            target.writeUUID(au.getAttributeId());
+            target.writeLong(au.getAttributeId().getMostSignificantBits()); // TODO change ATTRIBUTE_UPDATE_LENGTH if generalizing this.
+            target.writeLong(au.getAttributeId().getLeastSignificantBits());
             target.writeByte(au.getUpdateType().getTypeId());
             target.writeLong(au.getValue());
             target.writeLong(au.getComparisonValue());
@@ -190,7 +192,7 @@ public class StreamSegmentAppendOperation extends StorageOperation implements At
 
         private AttributeUpdate readAttributeUpdate00(RevisionDataInput source) throws IOException {
             return new AttributeUpdate(
-                    source.readUUID(),
+                    AttributeId.uuid(source.readLong(), source.readLong()),
                     AttributeUpdateType.get(source.readByte()),
                     source.readLong(),
                     source.readLong());

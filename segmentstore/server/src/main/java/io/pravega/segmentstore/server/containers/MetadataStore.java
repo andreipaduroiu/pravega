@@ -22,6 +22,7 @@ import io.pravega.common.io.serialization.RevisionDataOutput;
 import io.pravega.common.io.serialization.VersionedSerializer;
 import io.pravega.common.util.ArrayView;
 import io.pravega.common.util.BufferView;
+import io.pravega.segmentstore.contracts.AttributeId;
 import io.pravega.segmentstore.contracts.AttributeUpdate;
 import io.pravega.segmentstore.contracts.Attributes;
 import io.pravega.segmentstore.contracts.SegmentProperties;
@@ -40,7 +41,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
@@ -698,7 +698,7 @@ public abstract class MetadataStore implements AutoCloseable {
                     .builder()
                     .name(name);
             val attributes = attributeUpdates == null
-                    ? new HashMap<UUID, Long>()
+                    ? new HashMap<AttributeId, Long>()
                     : attributeUpdates.stream().collect(Collectors.toMap(AttributeUpdate::getAttributeId, AttributeUpdate::getValue));
             attributes.put(Attributes.ATTRIBUTE_SEGMENT_TYPE, segmentType.getValue());
             infoBuilder.attributes(attributes);
@@ -771,7 +771,7 @@ public abstract class MetadataStore implements AutoCloseable {
                 output.writeBoolean(sp.isSealed());
 
                 // We only serialize Core Attributes. Extended Attributes can be retrieved from the AttributeIndex.
-                output.writeMap(Attributes.getCoreNonNullAttributes(sp.getAttributes()), RevisionDataOutput::writeUUID, RevisionDataOutput::writeLong);
+                output.writeMap(Attributes.getCoreNonNullAttributes(sp.getAttributes()), this::writeAttributeId00, RevisionDataOutput::writeLong);
             }
 
             private void read00(RevisionDataInput input, SegmentInfo.SegmentInfoBuilder builder) throws IOException {
@@ -782,8 +782,17 @@ public abstract class MetadataStore implements AutoCloseable {
                         .length(input.readLong())
                         .startOffset(input.readLong())
                         .sealed(input.readBoolean());
-                infoBuilder.attributes(input.readMap(RevisionDataInput::readUUID, RevisionDataInput::readLong));
+                infoBuilder.attributes(input.readMap(this::readAttributeId00, RevisionDataInput::readLong));
                 builder.properties(infoBuilder.build());
+            }
+
+            private void writeAttributeId00(RevisionDataOutput out, AttributeId attributeId) throws IOException {
+                out.writeLong(attributeId.getMostSignificantBits());
+                out.writeLong(attributeId.getLeastSignificantBits());
+            }
+
+            private AttributeId readAttributeId00(RevisionDataInput in) throws IOException {
+                return AttributeId.uuid(in.readLong(), in.readLong());
             }
         }
     }

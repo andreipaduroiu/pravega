@@ -22,6 +22,7 @@ import io.pravega.common.util.IllegalDataFormatException;
 import io.pravega.common.util.Retry;
 import io.pravega.common.util.btree.BTreeIndex;
 import io.pravega.common.util.btree.PageEntry;
+import io.pravega.segmentstore.contracts.AttributeId;
 import io.pravega.segmentstore.contracts.Attributes;
 import io.pravega.segmentstore.contracts.BadOffsetException;
 import io.pravega.segmentstore.contracts.SegmentProperties;
@@ -49,7 +50,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -273,7 +273,7 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
     //region AttributeIndex Implementation
 
     @Override
-    public CompletableFuture<Long> update(@NonNull Map<UUID, Long> values, @NonNull Duration timeout) {
+    public CompletableFuture<Long> update(@NonNull Map<AttributeId, Long> values, @NonNull Duration timeout) {
         ensureInitialized();
         if (values.isEmpty()) {
             // Nothing to do.
@@ -285,7 +285,7 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
     }
 
     @Override
-    public CompletableFuture<Map<UUID, Long>> get(@NonNull Collection<UUID> keys, @NonNull Duration timeout) {
+    public CompletableFuture<Map<AttributeId, Long>> get(@NonNull Collection<AttributeId> keys, @NonNull Duration timeout) {
         ensureInitialized();
         if (keys.isEmpty()) {
             // Nothing to do.
@@ -293,9 +293,9 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
         }
 
         // Keep two lists, one of keys (in some order) and one of serialized keys (in the same order).
-        val keyList = new ArrayList<UUID>(keys.size());
+        val keyList = new ArrayList<AttributeId>(keys.size());
         val serializedKeys = new ArrayList<ByteArraySegment>(keys.size());
-        for (UUID key : keys) {
+        for (AttributeId key : keys) {
             keyList.add(key);
             serializedKeys.add(serializeKey(key));
         }
@@ -308,7 +308,7 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
 
                     // The index search result is a list of values in the same order as the keys we passed in, so we need
                     // to use the list index to match them.
-                    Map<UUID, Long> result = new HashMap<>();
+                    Map<AttributeId, Long> result = new HashMap<>();
                     for (int i = 0; i < keyList.size(); i++) {
                         ByteArraySegment v = entries.get(i);
                         if (v != null) {
@@ -340,7 +340,7 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
     }
 
     @Override
-    public AttributeIterator iterator(UUID fromId, UUID toId, Duration fetchTimeout) {
+    public AttributeIterator iterator(AttributeId fromId, AttributeId toId, Duration fetchTimeout) {
         ensureInitialized();
         return new AttributeIteratorImpl(fromId, (id, inclusive) ->
                 this.index.iterator(serializeKey(id), inclusive, serializeKey(toId), true, fetchTimeout));
@@ -437,24 +437,24 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
                 });
     }
 
-    private PageEntry serialize(Map.Entry<UUID, Long> entry) {
+    private PageEntry serialize(Map.Entry<AttributeId, Long> entry) {
         return new PageEntry(serializeKey(entry.getKey()), serializeValue(entry.getValue()));
     }
 
-    private ByteArraySegment serializeKey(UUID key) {
+    private ByteArraySegment serializeKey(AttributeId key) {
         // Keys are serialized using Unsigned Longs. This ensures that they will be stored in the Attribute Index in their
-        // natural order (i.e., the same as the one done by UUID.compare()).
+        // natural order (i.e., the same as the one done by AttributeId.compare()).
         ByteArraySegment result = new ByteArraySegment(new byte[KEY_LENGTH]);
         result.setUnsignedLong(0, key.getMostSignificantBits());
         result.setUnsignedLong(Long.BYTES, key.getLeastSignificantBits());
         return result;
     }
 
-    private UUID deserializeKey(ByteArraySegment key) {
+    private AttributeId deserializeKey(ByteArraySegment key) {
         Preconditions.checkArgument(key.getLength() == KEY_LENGTH, "Unexpected key length.");
         long msb = key.getUnsignedLong(0);
         long lsb = key.getUnsignedLong(Long.BYTES);
-        return new UUID(msb, lsb);
+        return AttributeId.uuid(msb, lsb);
     }
 
     private ByteArraySegment serializeValue(Long value) {
@@ -842,10 +842,10 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
     private class AttributeIteratorImpl implements AttributeIterator {
         private final CreatePageEntryIterator getPageEntryIterator;
         private final AtomicReference<AsyncIterator<List<PageEntry>>> pageEntryIterator;
-        private final AtomicReference<UUID> lastProcessedId;
+        private final AtomicReference<AttributeId> lastProcessedId;
         private final AtomicBoolean firstInvocation;
 
-        AttributeIteratorImpl(UUID firstId, CreatePageEntryIterator getPageEntryIterator) {
+        AttributeIteratorImpl(AttributeId firstId, CreatePageEntryIterator getPageEntryIterator) {
             this.getPageEntryIterator = getPageEntryIterator;
             this.pageEntryIterator = new AtomicReference<>();
             this.lastProcessedId = new AtomicReference<>(firstId);
@@ -854,7 +854,7 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
         }
 
         @Override
-        public CompletableFuture<List<Map.Entry<UUID, Long>>> getNext() {
+        public CompletableFuture<List<Map.Entry<AttributeId, Long>>> getNext() {
             return READ_RETRY
                     .runAsync(this::getNextPageEntries, executor)
                     .thenApply(pageEntries -> {
@@ -899,7 +899,7 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
 
     @FunctionalInterface
     private interface CreatePageEntryIterator {
-        AsyncIterator<List<PageEntry>> apply(UUID firstId, boolean firstIdInclusive);
+        AsyncIterator<List<PageEntry>> apply(AttributeId firstId, boolean firstIdInclusive);
     }
 
     @RequiredArgsConstructor

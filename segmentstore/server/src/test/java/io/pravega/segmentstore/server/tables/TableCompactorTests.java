@@ -13,6 +13,7 @@ import com.google.common.collect.ImmutableMap;
 import io.pravega.common.TimeoutTimer;
 import io.pravega.common.util.BufferView;
 import io.pravega.common.util.ByteArraySegment;
+import io.pravega.segmentstore.contracts.AttributeId;
 import io.pravega.segmentstore.contracts.tables.TableAttributes;
 import io.pravega.segmentstore.contracts.tables.TableEntry;
 import io.pravega.segmentstore.contracts.tables.TableKey;
@@ -430,7 +431,7 @@ public class TableCompactorTests extends ThreadPooledTestSuite {
     }
 
     private void setSegmentState(long compactionOffset, long indexOffset, long entryCount, long totalEntryCount, long utilizationThreshold, TestContext context) {
-        context.segmentMetadata.updateAttributes(ImmutableMap.<UUID, Long>builder()
+        context.segmentMetadata.updateAttributes(ImmutableMap.<AttributeId, Long>builder()
                 .put(TableAttributes.COMPACTION_OFFSET, compactionOffset)
                 .put(TableAttributes.INDEX_OFFSET, indexOffset)
                 .put(TableAttributes.ENTRY_COUNT, entryCount)
@@ -440,19 +441,19 @@ public class TableCompactorTests extends ThreadPooledTestSuite {
     }
 
     private void setMinUtilization(long utilizationThreshold, TestContext context) {
-        context.segmentMetadata.updateAttributes(ImmutableMap.<UUID, Long>builder()
+        context.segmentMetadata.updateAttributes(ImmutableMap.<AttributeId, Long>builder()
                 .put(TableAttributes.MIN_UTILIZATION, utilizationThreshold)
                 .build());
     }
 
     private void setCompactionOffset(long compactionOffset, TestContext context) {
-        context.segmentMetadata.updateAttributes(ImmutableMap.<UUID, Long>builder()
+        context.segmentMetadata.updateAttributes(ImmutableMap.<AttributeId, Long>builder()
                 .put(TableAttributes.COMPACTION_OFFSET, compactionOffset)
                 .build());
     }
 
     private void setLastIndexedOffset(long offset, TestContext context) {
-        context.segmentMetadata.updateAttributes(ImmutableMap.<UUID, Long>builder()
+        context.segmentMetadata.updateAttributes(ImmutableMap.<AttributeId, Long>builder()
                 .put(TableAttributes.INDEX_OFFSET, offset)
                 .build());
     }

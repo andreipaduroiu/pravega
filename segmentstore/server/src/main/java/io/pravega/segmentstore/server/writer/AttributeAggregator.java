@@ -14,6 +14,7 @@ import io.pravega.common.AbstractTimer;
 import io.pravega.common.Exceptions;
 import io.pravega.common.TimeoutTimer;
 import io.pravega.common.concurrent.Futures;
+import io.pravega.segmentstore.contracts.AttributeId;
 import io.pravega.segmentstore.contracts.AttributeUpdate;
 import io.pravega.segmentstore.contracts.Attributes;
 import io.pravega.segmentstore.contracts.StreamSegmentMergedException;
@@ -31,7 +32,6 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -228,7 +228,7 @@ class AttributeAggregator implements WriterSegmentProcessor, AutoCloseable {
 
     //region Helpers
 
-    private CompletableFuture<Void> persistPendingAttributes(Map<UUID, Long> attributes, long lastSeqNo, TimeoutTimer timer) {
+    private CompletableFuture<Void> persistPendingAttributes(Map<AttributeId, Long> attributes, long lastSeqNo, TimeoutTimer timer) {
         if (attributes.isEmpty()) {
             return CompletableFuture.completedFuture(null);
         }
@@ -328,7 +328,7 @@ class AttributeAggregator implements WriterSegmentProcessor, AutoCloseable {
      */
     @ThreadSafe
     private static class State {
-        private final Map<UUID, Long> attributes;
+        private final Map<AttributeId, Long> attributes;
         private final AtomicLong lastPersistedSequenceNumber;
         private final AtomicLong firstSequenceNumber;
         private final AtomicLong lastSequenceNumber;
@@ -465,7 +465,7 @@ class AttributeAggregator implements WriterSegmentProcessor, AutoCloseable {
          *
          * @return The attributes and their latest values.
          */
-        Map<UUID, Long> getAttributes() {
+        Map<AttributeId, Long> getAttributes() {
             return this.attributes;
         }
 

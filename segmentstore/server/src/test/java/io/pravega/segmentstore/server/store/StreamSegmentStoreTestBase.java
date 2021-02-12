@@ -19,6 +19,7 @@ import io.pravega.common.concurrent.Futures;
 import io.pravega.common.concurrent.Services;
 import io.pravega.common.util.BufferView;
 import io.pravega.common.util.Retry;
+import io.pravega.segmentstore.contracts.AttributeId;
 import io.pravega.segmentstore.contracts.AttributeUpdate;
 import io.pravega.segmentstore.contracts.AttributeUpdateType;
 import io.pravega.segmentstore.contracts.Attributes;
@@ -97,7 +98,7 @@ public abstract class StreamSegmentStoreTestBase extends ThreadPooledTestSuite {
     private static final int MAX_INSTANCE_COUNT = 4;
     private static final int CONTAINER_COUNT = 4;
     private static final long DEFAULT_EPOCH = 1;
-    private static final List<UUID> ATTRIBUTES = Streams.concat(Stream.of(Attributes.EVENT_COUNT), IntStream.range(0, 10).mapToObj(i -> UUID.randomUUID())).collect(Collectors.toList());
+    private static final List<AttributeId> ATTRIBUTES = Streams.concat(Stream.of(Attributes.EVENT_COUNT), IntStream.range(0, 10).mapToObj(i -> AttributeId.randomUUID())).collect(Collectors.toList());
     private static final int ATTRIBUTE_UPDATE_DELTA = APPENDS_PER_SEGMENT + ATTRIBUTE_UPDATES_PER_SEGMENT;
     private static final Duration TIMEOUT = Duration.ofSeconds(120);
     private static final ContainerConfig DEFAULT_CONFIG = ContainerConfig
@@ -752,7 +753,7 @@ public abstract class StreamSegmentStoreTestBase extends ThreadPooledTestSuite {
 
                 // Check attributes.
                 val allAttributes = store.getAttributes(segmentName, ATTRIBUTES, true, TIMEOUT).join();
-                for (UUID attributeId : ATTRIBUTES) {
+                for (AttributeId attributeId : ATTRIBUTES) {
                     Assert.assertEquals("Unexpected attribute value from getAttributes().",
                             expectedAttributeValue, (long) allAttributes.getOrDefault(attributeId, Attributes.NULL_ATTRIBUTE_VALUE));
 

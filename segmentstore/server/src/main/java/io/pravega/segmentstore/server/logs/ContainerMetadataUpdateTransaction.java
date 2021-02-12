@@ -16,6 +16,7 @@ import io.pravega.common.io.serialization.RevisionDataInput;
 import io.pravega.common.io.serialization.RevisionDataOutput;
 import io.pravega.common.io.serialization.VersionedSerializer;
 import io.pravega.common.util.ImmutableDate;
+import io.pravega.segmentstore.contracts.AttributeId;
 import io.pravega.segmentstore.contracts.Attributes;
 import io.pravega.segmentstore.contracts.ContainerException;
 import io.pravega.segmentstore.contracts.StreamSegmentException;
@@ -692,7 +693,7 @@ class ContainerMetadataUpdateTransaction implements ContainerMetadata {
             output.writeLong(sm.getStartOffset());
 
             // We only serialize Core Attributes. Extended Attributes can be retrieved from the AttributeIndex.
-            output.writeMap(Attributes.getCoreNonNullAttributes(sm.getAttributes()), RevisionDataOutput::writeUUID, RevisionDataOutput::writeLong);
+            output.writeMap(Attributes.getCoreNonNullAttributes(sm.getAttributes()), this::writeAttributeId00, RevisionDataOutput::writeLong);
         }
 
         private UpdateableSegmentMetadata readSegmentMetadata00(RevisionDataInput input, ContainerMetadataUpdateTransaction t) throws IOException {
@@ -732,9 +733,18 @@ class ContainerMetadataUpdateTransaction implements ContainerMetadata {
             metadata.setLastModified(lastModified);
             metadata.setStartOffset(input.readLong());
 
-            val attributes = input.readMap(RevisionDataInput::readUUID, RevisionDataInput::readLong);
+            val attributes = input.readMap(this::readAttributeId00, RevisionDataInput::readLong);
             metadata.updateAttributes(attributes);
             return metadata;
+        }
+
+        private void writeAttributeId00(RevisionDataOutput out, AttributeId attributeId) throws IOException {
+            out.writeLong(attributeId.getMostSignificantBits());
+            out.writeLong(attributeId.getLeastSignificantBits());
+        }
+
+        private AttributeId readAttributeId00(RevisionDataInput in) throws IOException {
+            return AttributeId.uuid(in.readLong(), in.readLong());
         }
     }
 

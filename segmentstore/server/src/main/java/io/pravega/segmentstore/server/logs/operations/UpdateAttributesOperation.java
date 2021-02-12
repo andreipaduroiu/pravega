@@ -12,6 +12,7 @@ package io.pravega.segmentstore.server.logs.operations;
 import com.google.common.base.Preconditions;
 import io.pravega.common.io.serialization.RevisionDataInput;
 import io.pravega.common.io.serialization.RevisionDataOutput;
+import io.pravega.segmentstore.contracts.AttributeId;
 import io.pravega.segmentstore.contracts.AttributeUpdate;
 import io.pravega.segmentstore.contracts.AttributeUpdateType;
 import java.io.IOException;
@@ -107,7 +108,8 @@ public class UpdateAttributesOperation extends MetadataOperation implements Attr
         }
 
         private void writeAttributeUpdate00(RevisionDataOutput target, AttributeUpdate au) throws IOException {
-            target.writeUUID(au.getAttributeId());
+            target.writeLong(au.getAttributeId().getMostSignificantBits()); // TODO change ATTRIBUTE_UPDATE_LENGTH if generalizing this.
+            target.writeLong(au.getAttributeId().getLeastSignificantBits());
             target.writeByte(au.getUpdateType().getTypeId());
             target.writeLong(au.getValue());
             target.writeLong(au.getComparisonValue());
@@ -115,7 +117,7 @@ public class UpdateAttributesOperation extends MetadataOperation implements Attr
 
         private AttributeUpdate readAttributeUpdate00(RevisionDataInput source) throws IOException {
             return new AttributeUpdate(
-                    source.readUUID(),
+                    AttributeId.uuid(source.readLong(), source.readLong()),
                     AttributeUpdateType.get(source.readByte()),
                     source.readLong(),
                     source.readLong());

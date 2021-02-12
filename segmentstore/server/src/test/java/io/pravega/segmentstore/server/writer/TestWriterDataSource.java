@@ -15,6 +15,7 @@ import io.pravega.common.Exceptions;
 import io.pravega.common.function.Callbacks;
 import io.pravega.common.util.BufferView;
 import io.pravega.common.util.ByteArraySegment;
+import io.pravega.segmentstore.contracts.AttributeId;
 import io.pravega.segmentstore.contracts.Attributes;
 import io.pravega.segmentstore.contracts.SegmentType;
 import io.pravega.segmentstore.contracts.StreamSegmentNotExistsException;
@@ -35,7 +36,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Queue;
 import java.util.TreeMap;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -66,7 +66,7 @@ class TestWriterDataSource implements WriterDataSource, AutoCloseable {
     @GuardedBy("lock")
     private final HashMap<Long, AppendData> appendData;
     @GuardedBy("lock")
-    private final HashMap<Long, Map<UUID, Long>> attributeData;
+    private final HashMap<Long, Map<AttributeId, Long>> attributeData;
     @GuardedBy("lock")
     private final HashMap<Long, Long> attributeRootPointers;
     @GuardedBy("lock")
@@ -252,7 +252,7 @@ class TestWriterDataSource implements WriterDataSource, AutoCloseable {
     }
 
     @Override
-    public CompletableFuture<Long> persistAttributes(long streamSegmentId, Map<UUID, Long> attributes, Duration timeout) {
+    public CompletableFuture<Long> persistAttributes(long streamSegmentId, Map<AttributeId, Long> attributes, Duration timeout) {
         Exceptions.checkNotClosed(this.closed.get(), this);
         ErrorInjector<Exception> asyncErrorInjector;
         synchronized (this.lock) {
@@ -263,7 +263,7 @@ class TestWriterDataSource implements WriterDataSource, AutoCloseable {
                 .throwAsyncExceptionIfNeeded(asyncErrorInjector, () -> CompletableFuture.supplyAsync(() -> {
                     synchronized (this.lock) {
                         // We use "null" as an indication that the attribute data is deleted, hence the extra work here.
-                        Map<UUID, Long> segmentAttributes;
+                        Map<AttributeId, Long> segmentAttributes;
                         if (this.attributeData.containsKey(streamSegmentId)) {
                             segmentAttributes = this.attributeData.get(streamSegmentId);
                         } else {
@@ -315,7 +315,7 @@ class TestWriterDataSource implements WriterDataSource, AutoCloseable {
             Long expectedRootPointer = this.attributeRootPointers.getOrDefault(segmentId, Long.MIN_VALUE);
             if (!validateRootPointer || expectedRootPointer == rootPointer) {
                 this.metadata.getStreamSegmentMetadata(segmentId).updateAttributes(
-                        ImmutableMap.<UUID, Long>builder()
+                        ImmutableMap.<AttributeId, Long>builder()
                                 .put(Attributes.ATTRIBUTE_SEGMENT_ROOT_POINTER, rootPointer)
                                 .put(Attributes.ATTRIBUTE_SEGMENT_PERSIST_SEQ_NO, lastSequenceNumber)
                                 .build());
@@ -329,7 +329,7 @@ class TestWriterDataSource implements WriterDataSource, AutoCloseable {
     public CompletableFuture<Void> sealAttributes(long streamSegmentId, Duration timeout) {
         return CompletableFuture.runAsync(() -> {
             synchronized (this.lock) {
-                Map<UUID, Long> segmentAttributes = this.attributeData.computeIfAbsent(streamSegmentId, k -> new HashMap<>());
+                Map<AttributeId, Long> segmentAttributes = this.attributeData.computeIfAbsent(streamSegmentId, k -> new HashMap<>());
                 this.attributeData.put(streamSegmentId, Collections.unmodifiableMap(segmentAttributes));
             }
         }, this.executor);
@@ -520,7 +520,7 @@ class TestWriterDataSource implements WriterDataSource, AutoCloseable {
     /**
      * Gets a copy of all the attributes so far.
      */
-    Map<UUID, Long> getPersistedAttributes(long segmentId) {
+    Map<AttributeId, Long> getPersistedAttributes(long segmentId) {
         synchronized (this.lock) {
             val m = this.attributeData.get(segmentId);
             return m == null ? Collections.emptyMap() : Collections.unmodifiableMap(new HashMap<>(m));

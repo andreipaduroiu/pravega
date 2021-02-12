@@ -11,7 +11,6 @@ package io.pravega.segmentstore.contracts;
 
 import io.pravega.common.util.ImmutableDate;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * General properties about a StreamSegment.
@@ -69,6 +68,6 @@ public interface SegmentProperties {
      *
      * @return The map.
      */
-    Map<UUID, Long> getAttributes();
+    Map<AttributeId, Long> getAttributes();
 }
 

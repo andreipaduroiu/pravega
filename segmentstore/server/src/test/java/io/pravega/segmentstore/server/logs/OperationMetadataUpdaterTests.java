@@ -10,6 +10,7 @@
 package io.pravega.segmentstore.server.logs;
 
 import io.pravega.common.util.ByteArraySegment;
+import io.pravega.segmentstore.contracts.AttributeId;
 import io.pravega.segmentstore.contracts.AttributeUpdate;
 import io.pravega.segmentstore.contracts.AttributeUpdateType;
 import io.pravega.segmentstore.contracts.Attributes;
@@ -30,7 +31,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -48,7 +48,7 @@ public class OperationMetadataUpdaterTests {
     private static final int CONTAINER_ID = 1;
     private static final int MAX_ACTIVE_SEGMENT_COUNT = TRANSACTION_COUNT * 100;
     private static final Supplier<Long> NEXT_ATTRIBUTE_VALUE = System::nanoTime;
-    private static final UUID PARENT_ID = new UUID(1234, 1234);
+    private static final AttributeId PARENT_ID = AttributeId.uuid(1234, 1234);
     @Rule
     public Timeout globalTimeout = Timeout.seconds(30);
     private final Supplier<Integer> nextAppendLength = () -> Math.max(1, (int) System.nanoTime() % 1000);
@@ -335,7 +335,7 @@ public class OperationMetadataUpdaterTests {
         if (referenceMetadata != null) {
             val rsm = referenceMetadata.getStreamSegmentMetadata(segmentId);
             rsm.setLength(rsm.getLength() + length);
-            val attributes = new HashMap<UUID, Long>();
+            val attributes = new HashMap<AttributeId, Long>();
             op.getAttributeUpdates().forEach(au -> attributes.put(au.getAttributeId(), au.getValue()));
             rsm.updateAttributes(attributes);
         }

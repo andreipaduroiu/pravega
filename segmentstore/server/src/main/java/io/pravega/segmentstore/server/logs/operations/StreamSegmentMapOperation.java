@@ -201,8 +201,9 @@ public class StreamSegmentMapOperation extends MetadataOperation {
         }
 
         private void writeAttributeId00(RevisionDataOutput out, AttributeId attributeId) throws IOException {
-            out.writeLong(attributeId.getMostSignificantBits());
-            out.writeLong(attributeId.getLeastSignificantBits());
+            assert attributeId.isUUID();
+            out.writeLong(attributeId.getBitGroup(0));
+            out.writeLong(attributeId.getBitGroup(1));
         }
 
         private AttributeId readAttributeId00(RevisionDataInput in) throws IOException {

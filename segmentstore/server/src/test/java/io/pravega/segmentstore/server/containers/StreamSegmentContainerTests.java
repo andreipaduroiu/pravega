@@ -684,7 +684,7 @@ public class StreamSegmentContainerTests extends ThreadPooledTestSuite {
     @Test
     public void testAttributeIterators() throws Exception {
         final List<AttributeId> sortedAttributes = IntStream.range(0, 100).mapToObj(i -> AttributeId.uuid(i, i)).sorted().collect(Collectors.toList());
-        final Map<AttributeId, Long> expectedValues = sortedAttributes.stream().collect(Collectors.toMap(id -> id, AttributeId::getMostSignificantBits));
+        final Map<AttributeId, Long> expectedValues = sortedAttributes.stream().collect(Collectors.toMap(id -> id, id -> id.getBitGroup(0)));
         final TestContainerConfig containerConfig = new TestContainerConfig();
         containerConfig.setSegmentMetadataExpiration(Duration.ofMillis(EVICTION_SEGMENT_EXPIRATION_MILLIS_SHORT));
 

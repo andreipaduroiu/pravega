@@ -117,7 +117,7 @@ public class StreamSegmentMetadataTests {
         SegmentMetadataComparer.assertSameAttributes("Unexpected attributes after update.", expectedAttributes, metadata);
 
         // Check getAttributes(filter).
-        BiPredicate<AttributeId, Long> filter = (key, value) -> key.getLeastSignificantBits() % 2 == 0;
+        BiPredicate<AttributeId, Long> filter = (key, value) -> key.getBitGroup(1) % 2 == 0;
         val expectedFilteredAttributes = expectedAttributes.entrySet().stream()
                                                            .filter(e -> filter.test(e.getKey(), e.getValue()))
                                                            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));

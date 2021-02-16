@@ -180,7 +180,7 @@ public class SegmentAttributeIteratorTests extends ThreadPooledTestSuite {
                 nextAttributeId++;
             } else if (rnd.nextDouble() > ATTRIBUTE_OVERLAP_RATIO) {
                 // Do not reuse attribute id, but choose one nearby.
-                attributeId = AttributeId.uuid(attributeId.getMostSignificantBits() + 1, attributeId.getLeastSignificantBits() + 1);
+                attributeId = AttributeId.uuid(attributeId.getBitGroup(0) + 1, attributeId.getBitGroup(1) + 1);
             }
 
             long attributeValue = rnd.nextLong();

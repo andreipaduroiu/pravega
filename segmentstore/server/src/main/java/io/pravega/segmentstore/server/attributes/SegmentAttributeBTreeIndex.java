@@ -94,7 +94,7 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
             .retryingOn(StreamSegmentTruncatedException.class)
             .throwingOn(Exception.class);
 
-    private static final int KEY_LENGTH = 2 * Long.BYTES; // UUID
+    private static final int DEFAULT_KEY_LENGTH = Attributes.ATTRIBUTE_ID_LENGTH.byteCount(); // UUID has 16 bytes.
     private static final int VALUE_LENGTH = Long.BYTES;
     private final SegmentMetadata segmentMetadata;
     private final AtomicReference<SegmentHandle> handle;
@@ -112,6 +112,7 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
     private final ScheduledExecutorService executor;
     private final String traceObjectId;
     private final AtomicBoolean closed;
+    private final KeySerializer keySerializer;
 
     //endregion
 
@@ -134,20 +135,28 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
         this.executor = executor;
         this.handle = new AtomicReference<>();
         this.traceObjectId = String.format("AttributeIndex[%d-%d]", this.segmentMetadata.getContainerId(), this.segmentMetadata.getId());
+        this.keySerializer = getKeySerializer(segmentMetadata);
         this.index = BTreeIndex.builder()
-                               .keyLength(KEY_LENGTH)
-                               .valueLength(VALUE_LENGTH)
-                               .maxPageSize(this.config.getMaxIndexPageSize())
-                               .executor(this.executor)
-                               .getLength(this::getLength)
-                               .readPage(this::readPage)
-                               .writePages(this::writePages)
-                               .traceObjectId(this.traceObjectId)
-                               .build();
+                .keyLength(this.keySerializer.getKeyLength())
+                .valueLength(VALUE_LENGTH)
+                .maxPageSize(this.config.getMaxIndexPageSize())
+                .executor(this.executor)
+                .getLength(this::getLength)
+                .readPage(this::readPage)
+                .writePages(this::writePages)
+                .traceObjectId(this.traceObjectId)
+                .build();
 
         this.cacheEntries = new HashMap<>();
         this.pendingReads = new HashMap<>();
         this.closed = new AtomicBoolean();
+    }
+
+    private KeySerializer getKeySerializer(SegmentMetadata segmentMetadata) {
+        long keyLength = segmentMetadata.getAttributes().getOrDefault(Attributes.ATTRIBUTE_ID_LENGTH, 0L);
+        Preconditions.checkArgument(keyLength <= AttributeId.MAX_KEY_LENGTH, "Invalid value %s for attribute `%s` for Segment `%s'. Expected at most %s.",
+                Attributes.ATTRIBUTE_ID_LENGTH, segmentMetadata.getName(), AttributeId.MAX_KEY_LENGTH);
+        return keyLength <= 0 ? new UUIDKeySerializer() : new BufferKeySerializer((int) keyLength);
     }
 
     /**
@@ -297,7 +306,7 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
         val serializedKeys = new ArrayList<ByteArraySegment>(keys.size());
         for (AttributeId key : keys) {
             keyList.add(key);
-            serializedKeys.add(serializeKey(key));
+            serializedKeys.add(this.keySerializer.serialize(key));
         }
 
         // Fetch the raw data from the index, but retry (as needed) if we run across a truncated part of the attribute
@@ -343,7 +352,7 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
     public AttributeIterator iterator(AttributeId fromId, AttributeId toId, Duration fetchTimeout) {
         ensureInitialized();
         return new AttributeIteratorImpl(fromId, (id, inclusive) ->
-                this.index.iterator(serializeKey(id), inclusive, serializeKey(toId), true, fetchTimeout));
+                this.index.iterator(this.keySerializer.serialize(id), inclusive, this.keySerializer.serialize(toId), true, fetchTimeout));
     }
 
     //endregion
@@ -438,23 +447,7 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
     }
 
     private PageEntry serialize(Map.Entry<AttributeId, Long> entry) {
-        return new PageEntry(serializeKey(entry.getKey()), serializeValue(entry.getValue()));
-    }
-
-    private ByteArraySegment serializeKey(AttributeId key) {
-        // Keys are serialized using Unsigned Longs. This ensures that they will be stored in the Attribute Index in their
-        // natural order (i.e., the same as the one done by AttributeId.compare()).
-        ByteArraySegment result = new ByteArraySegment(new byte[KEY_LENGTH]);
-        result.setUnsignedLong(0, key.getMostSignificantBits());
-        result.setUnsignedLong(Long.BYTES, key.getLeastSignificantBits());
-        return result;
-    }
-
-    private AttributeId deserializeKey(ByteArraySegment key) {
-        Preconditions.checkArgument(key.getLength() == KEY_LENGTH, "Unexpected key length.");
-        long msb = key.getUnsignedLong(0);
-        long lsb = key.getUnsignedLong(Long.BYTES);
-        return AttributeId.uuid(msb, lsb);
+        return new PageEntry(this.keySerializer.serialize(entry.getKey()), serializeValue(entry.getValue()));
     }
 
     private ByteArraySegment serializeValue(Long value) {
@@ -864,7 +857,7 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
                         }
 
                         val result = pageEntries.stream()
-                                                .map(e -> Maps.immutableEntry(deserializeKey(e.getKey()), deserializeValue(e.getValue())))
+                                .map(e -> Maps.immutableEntry(keySerializer.deserialize(e.getKey()), deserializeValue(e.getValue())))
                                                 .collect(Collectors.toList());
                         if (result.size() > 0) {
                             // Update the last Attribute Id and also indicate that we have processed at least one iteration.
@@ -908,6 +901,66 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
         final int length;
         final AtomicInteger count = new AtomicInteger(1);
         final CompletableFuture<ByteArraySegment> completion = new CompletableFuture<>();
+    }
+
+    //endregion
+
+    //region Key Serializers
+
+    private static abstract class KeySerializer {
+        abstract int getKeyLength();
+
+        abstract ByteArraySegment serialize(AttributeId key);
+
+        abstract AttributeId deserialize(ByteArraySegment key);
+
+        protected void checkKeyLength(int length) {
+            Preconditions.checkArgument(length == DEFAULT_KEY_LENGTH, "Expected key length %s, given %s.", DEFAULT_KEY_LENGTH, length);
+        }
+    }
+
+    @RequiredArgsConstructor
+    @Getter
+    private static class BufferKeySerializer extends KeySerializer {
+        private final int keyLength;
+
+        @Override
+        ByteArraySegment serialize(AttributeId key) {
+            checkKeyLength(key.byteCount());
+            return key.toBuffer();
+        }
+
+        @Override
+        AttributeId deserialize(ByteArraySegment key) {
+            checkKeyLength(key.getLength());
+            return AttributeId.from(new ByteArraySegment(key.getCopy()));
+        }
+    }
+
+    private static class UUIDKeySerializer extends KeySerializer {
+        @Override
+        int getKeyLength() {
+            return DEFAULT_KEY_LENGTH;
+        }
+
+        @Override
+        ByteArraySegment serialize(AttributeId key) {
+            // Keys are serialized using Unsigned Longs. This ensures that they will be stored in the Attribute Index in their
+            // natural order (i.e., the same as the one done by AttributeId.compare()).
+            checkKeyLength(key.byteCount());
+            ByteArraySegment result = new ByteArraySegment(new byte[DEFAULT_KEY_LENGTH]);
+            result.setUnsignedLong(0, key.getBitGroup(0));
+            result.setUnsignedLong(Long.BYTES, key.getBitGroup(1));
+            return result;
+        }
+
+        @Override
+        AttributeId deserialize(ByteArraySegment key) {
+            checkKeyLength(key.getLength());
+            long msb = key.getUnsignedLong(0);
+            long lsb = key.getUnsignedLong(Long.BYTES);
+            return AttributeId.uuid(msb, lsb);
+        }
     }
 
     //endregion

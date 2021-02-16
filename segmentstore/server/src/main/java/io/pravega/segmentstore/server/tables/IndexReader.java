@@ -138,7 +138,8 @@ class IndexReader {
         return segment
                 .getAttributes(attributeIds, false, timer.getRemaining())
                 .thenApply(attributes -> attributes.entrySet().stream()
-                        .collect(Collectors.toMap(e -> e.getKey().toUUID(), e -> new TableBucket(e.getKey().toUUID(), e.getValue()))));
+                        .map(e -> new TableBucket(e.getKey().toUUID(), e.getValue()))
+                        .collect(Collectors.toMap(TableBucket::getHash, b -> b)));
     }
 
     /**
@@ -205,7 +206,7 @@ class IndexReader {
      */
     @VisibleForTesting
     static boolean isBackpointerAttributeKey(AttributeId key) {
-        return key.getMostSignificantBits() == TableBucket.BACKPOINTER_PREFIX;
+        return key.getBitGroup(0) == TableBucket.BACKPOINTER_PREFIX;
     }
 
     //endregion

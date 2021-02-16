@@ -41,7 +41,7 @@ public class AttributesTests {
 
     private List<AttributeId> getAllAttributes() {
         return Arrays.stream(Attributes.class.getDeclaredFields())
-                .filter(f -> f.getType().equals(AttributeId.UUID.class))
+                .filter(f -> f.getType().equals(AttributeId.class))
                 .map(f -> {
                     try {
                         return (AttributeId) f.get(null);

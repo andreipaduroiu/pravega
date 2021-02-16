@@ -28,9 +28,9 @@ public class StreamSegmentAppendOperation extends StorageOperation implements At
     //region Members
 
     private static final long NO_OFFSET = -1;
-    private long streamSegmentOffset;
-    private BufferView data;
-    private Collection<AttributeUpdate> attributeUpdates;
+    protected long streamSegmentOffset;
+    protected BufferView data;
+    protected Collection<AttributeUpdate> attributeUpdates;
 
     //endregion
 
@@ -66,7 +66,7 @@ public class StreamSegmentAppendOperation extends StorageOperation implements At
     /**
      * Deserialization constructor.
      */
-    private StreamSegmentAppendOperation() {
+    protected StreamSegmentAppendOperation() {
     }
 
     @Override
@@ -183,8 +183,8 @@ public class StreamSegmentAppendOperation extends StorageOperation implements At
         }
 
         private void writeAttributeUpdate00(RevisionDataOutput target, AttributeUpdate au) throws IOException {
-            target.writeLong(au.getAttributeId().getMostSignificantBits()); // TODO change ATTRIBUTE_UPDATE_LENGTH if generalizing this.
-            target.writeLong(au.getAttributeId().getLeastSignificantBits());
+            target.writeLong(au.getAttributeId().getBitGroup(0));
+            target.writeLong(au.getAttributeId().getBitGroup(1));
             target.writeByte(au.getUpdateType().getTypeId());
             target.writeLong(au.getValue());
             target.writeLong(au.getComparisonValue());

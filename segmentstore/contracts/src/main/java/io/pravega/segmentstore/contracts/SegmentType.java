@@ -36,6 +36,8 @@ public class SegmentType {
      */
     public static final SegmentType TABLE_SEGMENT_SORTED = SegmentType.builder().sortedTableSegment().build();
 
+    public static final SegmentType TABLE_SEGMENT_FIXED_KEY = SegmentType.builder().sortedTableSegment().build();
+
     //endregion
 
     //region Flags
@@ -52,6 +54,8 @@ public class SegmentType {
     static final long FORMAT_TABLE_SEGMENT = 0b0000_0001L;
     @VisibleForTesting
     static final long FORMAT_SORTED_TABLE_SEGMENT = 0b0000_0010L | FORMAT_TABLE_SEGMENT;
+    @VisibleForTesting
+    static final long FORMAT_FIXED_KEY_TABLE_SEGMENT = 0b0000_0100L | FORMAT_TABLE_SEGMENT; // TODO: this also implies sorted. Should we set the bit too?
     @VisibleForTesting
     static final long ROLE_INTERNAL = 0b0001_0000L;
     @VisibleForTesting
@@ -108,6 +112,15 @@ public class SegmentType {
     }
 
     /**
+     * Whether this {@link SegmentType} refers to a Fixed-Key Table Segment (which implies {@link #isTableSegment()}.
+     *
+     * @return True if Fixed-Key Table Segment, false otherwise.
+     */
+    public boolean isFixedKeyTableSegment() {
+        return (this.flags & FORMAT_FIXED_KEY_TABLE_SEGMENT) == FORMAT_FIXED_KEY_TABLE_SEGMENT;
+    }
+
+    /**
      * Whether this {@link SegmentType} refers to a Segment (regardless of Format) that is for exclusive internal access.
      * If so, external requests may be denied on such Segments.
      *
@@ -146,6 +159,8 @@ public class SegmentType {
         result.append(String.format("[%s]: Base", this.flags));
         if (isSortedTableSegment()) {
             result.append(", Table Segment (Sorted)");
+        } else if (isFixedKeyTableSegment()) {
+            result.append(", Table Segment (Fixed-Key)");
         } else if (isTableSegment()) {
             result.append(", Table Segment");
         }
@@ -178,7 +193,8 @@ public class SegmentType {
      * - {@link TableAttributes#SORTED} (whether a Sorted Table Segment - if not already in base value)
      *
      * The {@link TableAttributes} is necessary to support upgrades. {@link SegmentType} was introduced in Pravega 0.9,
-     * however Table Segments (and their sorted versions) were introduced in prior versions.
+     * however Hash and Sorted Table Segments were introduced in prior versions. Fixed-Key Table Segments were introduced
+     * post 0.9, so they should already have the correct Segment Type set.
      *
      * @param segmentAttributes A {@link Map} containing the Segment's Attributes to load from.
      * @return A {@link SegmentType}.
@@ -245,6 +261,11 @@ public class SegmentType {
 
         public Builder sortedTableSegment() {
             this.flags |= FORMAT_SORTED_TABLE_SEGMENT;
+            return this;
+        }
+
+        public Builder fixedKeyTableSegment() {
+            this.flags |= FORMAT_FIXED_KEY_TABLE_SEGMENT;
             return this;
         }
 

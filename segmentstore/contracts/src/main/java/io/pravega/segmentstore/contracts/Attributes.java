@@ -52,56 +52,62 @@ public class Attributes {
     /**
      * Defines an attribute that can be used to denote Segment creation time.
      */
-    public static final AttributeId.UUID CREATION_TIME = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 0);
+    public static final AttributeId CREATION_TIME = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 0);
 
     /**
      * Defines an attribute that can be used to keep track of the number of events in a Segment.
      */
-    public static final AttributeId.UUID EVENT_COUNT = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 1);
+    public static final AttributeId EVENT_COUNT = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 1);
 
     /**
      * Defines an attribute that is used to keep scale policy type for stream segment.
      */
-    public static final AttributeId.UUID SCALE_POLICY_TYPE = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 2);
+    public static final AttributeId SCALE_POLICY_TYPE = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 2);
 
     /**
      * Defines an attribute that is used to keep scale policy rate for stream segment.
      */
-    public static final AttributeId.UUID SCALE_POLICY_RATE = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 3);
+    public static final AttributeId SCALE_POLICY_RATE = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 3);
 
     /**
      * Defines an attribute that is used to set the value after which a Segment needs to be rolled over in Storage.
      */
-    public static final AttributeId.UUID ROLLOVER_SIZE = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 4);
+    public static final AttributeId ROLLOVER_SIZE = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 4);
 
     /**
      * [Retired August 2018. Do not reuse as obsolete values may still linger around.]
      * Attribute Snapshot Location.
      */
-    private static final AttributeId.UUID RETIRED_1 = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 5);
+    private static final AttributeId RETIRED_1 = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 5);
 
     /**
      * [Retired August 2018. Do not reuse as obsolete values may still linger around.]
      * Attribute Snapshot Length.
      */
-    private static final AttributeId.UUID RETIRED_2 = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 6);
+    private static final AttributeId RETIRED_2 = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 6);
 
     /**
      * Defines an attribute that is used to keep a pointer (offset) to the Attribute Segment BTree Index Root Information.
      */
-    public static final AttributeId.UUID ATTRIBUTE_SEGMENT_ROOT_POINTER = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 7);
+    public static final AttributeId ATTRIBUTE_SEGMENT_ROOT_POINTER = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 7);
 
     /**
      * Defines an attribute that is used to track the Sequence Number of the last Operation that was persisted into
      * the Attribute Index.
      */
-    public static final AttributeId.UUID ATTRIBUTE_SEGMENT_PERSIST_SEQ_NO = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 8);
+    public static final AttributeId ATTRIBUTE_SEGMENT_PERSIST_SEQ_NO = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 8);
 
     /**
      * Defines an attribute that is used to store the Segment's Type ({@link SegmentType#getValue()}.
      * This attribute cannot be modified once set on the Segment.
      */
-    public static final AttributeId.UUID ATTRIBUTE_SEGMENT_TYPE = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 9);
+    public static final AttributeId ATTRIBUTE_SEGMENT_TYPE = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 9);
+
+    /**
+     * Defines an attribute that is used to store the Segment's Extended Attribute Id Length.
+     * If not specified (or if set to 0), the default will be the length of {@link AttributeId.UUID} (16 bytes).
+     */
+    public static final AttributeId ATTRIBUTE_ID_LENGTH = AttributeId.uuid(CORE_ATTRIBUTE_ID_PREFIX, 10);
 
     /**
      * Determines whether the given attribute cannot be modified once originally set on the Segment.
@@ -121,7 +127,7 @@ public class Attributes {
      */
     public static boolean isCoreAttribute(AttributeId attributeId) {
         // TODO: consider moving to AttributeId.UUID
-        return attributeId.getMostSignificantBits() == CORE_ATTRIBUTE_ID_PREFIX;
+        return attributeId.isUUID() && attributeId.getBitGroup(0) == CORE_ATTRIBUTE_ID_PREFIX;
     }
 
     /**

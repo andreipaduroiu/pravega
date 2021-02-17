@@ -101,7 +101,9 @@ public class TableContext implements AutoCloseable {
     }
 
     ContainerTableExtensionImpl createExtension(int maxCompactionSize) {
-        return new TestTableExtensionImpl(this.container, this.cacheManager, this.hasher, this.executorService, maxCompactionSize);
+        val r = new ContainerTableExtensionImpl(this.container, this.cacheManager, this.hasher, this.executorService);
+        r.setMaxCompactionSize(maxCompactionSize);
+        return r;
     }
 
     UpdateableSegmentMetadata createSegmentMetadata() {
@@ -113,21 +115,6 @@ public class TableContext implements AutoCloseable {
 
     SegmentMock segment() {
         return this.container.getSegment();
-    }
-
-    static class TestTableExtensionImpl extends ContainerTableExtensionImpl {
-        private final int maxCompactionSize;
-
-        TestTableExtensionImpl(SegmentContainer segmentContainer, CacheManager cacheManager,
-                               KeyHasher hasher, ScheduledExecutorService executor, int maxCompactionSize) {
-            super(segmentContainer, cacheManager, hasher, executor);
-            this.maxCompactionSize = maxCompactionSize;
-        }
-
-        @Override
-        protected int getMaxCompactionSize() {
-            return this.maxCompactionSize == DEFAULT_COMPACTION_SIZE ? super.getMaxCompactionSize() : this.maxCompactionSize;
-        }
     }
 }
 
@@ -186,7 +173,8 @@ class MockSegmentContainer implements SegmentContainer {
                     SegmentMock segment = this.segmentCreator.get();
                     Assert.assertTrue(this.segment.compareAndSet(null, segment));
                 }, executorService)
-                .thenCompose(v -> this.segment.get().updateAttributes(attributes == null ? Collections.emptyList() : attributes, timeout));
+                .thenCompose(v -> this.segment.get().updateAttributes(attributes == null ? Collections.emptyList() : attributes, timeout))
+                .thenRun(() -> this.segment.get().getMetadata().refreshType());
     }
 
     @Override

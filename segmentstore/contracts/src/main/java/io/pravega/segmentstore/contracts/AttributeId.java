@@ -10,8 +10,6 @@
 package io.pravega.segmentstore.contracts;
 
 import com.google.common.annotations.VisibleForTesting;
-import io.pravega.common.util.BitConverter;
-import io.pravega.common.util.BufferView;
 import io.pravega.common.util.BufferViewComparator;
 import io.pravega.common.util.ByteArraySegment;
 import lombok.Getter;
@@ -47,7 +45,7 @@ public abstract class AttributeId implements Comparable<AttributeId> {
     }
 
     /**
-     * Creates a new {@link AttributeId.Variable} using the given {@link {@link BufferView}}.
+     * Creates a new {@link AttributeId.Variable} using the given {@link ByteArraySegment}.
      *
      * @param data The {@link ByteArraySegment} to wrap. NOTE: this will not be duplicated. Any changes to the underlying
      *             buffer will be reflected in this Attribute, which may have unintended consequences.

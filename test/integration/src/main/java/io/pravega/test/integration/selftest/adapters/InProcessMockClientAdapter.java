@@ -29,6 +29,7 @@ import io.pravega.segmentstore.contracts.tables.IteratorArgs;
 import io.pravega.segmentstore.contracts.tables.IteratorItem;
 import io.pravega.segmentstore.contracts.tables.TableEntry;
 import io.pravega.segmentstore.contracts.tables.TableKey;
+import io.pravega.segmentstore.contracts.tables.TableSegmentConfig;
 import io.pravega.segmentstore.contracts.tables.TableStore;
 import io.pravega.segmentstore.server.host.delegationtoken.PassingTokenVerifier;
 import io.pravega.segmentstore.server.host.handler.PravegaConnectionListener;
@@ -268,7 +269,7 @@ class InProcessMockClientAdapter extends ClientAdapterBase {
 
     private static class MockTableStore implements TableStore {
         @Override
-        public CompletableFuture<Void> createSegment(String segmentName, SegmentType segmentType, Duration timeout) {
+        public CompletableFuture<Void> createSegment(String segmentName, SegmentType segmentType, TableSegmentConfig config, Duration timeout) {
             throw new UnsupportedOperationException("createTableSegment");
         }
 

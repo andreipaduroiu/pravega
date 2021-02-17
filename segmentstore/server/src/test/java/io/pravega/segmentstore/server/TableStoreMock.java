@@ -23,6 +23,7 @@ import io.pravega.segmentstore.contracts.tables.IteratorItem;
 import io.pravega.segmentstore.contracts.tables.KeyNotExistsException;
 import io.pravega.segmentstore.contracts.tables.TableEntry;
 import io.pravega.segmentstore.contracts.tables.TableKey;
+import io.pravega.segmentstore.contracts.tables.TableSegmentConfig;
 import io.pravega.segmentstore.contracts.tables.TableStore;
 import java.time.Duration;
 import java.util.Collection;
@@ -58,10 +59,11 @@ public class TableStoreMock implements TableStore {
     //region TableStore Implementation
 
     @Override
-    public CompletableFuture<Void> createSegment(String segmentName, SegmentType segmentType, Duration timeout) {
+    public CompletableFuture<Void> createSegment(String segmentName, SegmentType segmentType, TableSegmentConfig config, Duration timeout) {
         Exceptions.checkNotClosed(this.closed.get(), this);
         Preconditions.checkArgument(segmentType.isTableSegment(), "Expected SegmentType.isTableSegment");
         Preconditions.checkArgument(!segmentType.isSortedTableSegment(), "Sorted Table Segments not supported in this mock.");
+        Preconditions.checkArgument(!segmentType.isFixedKeyTableSegment(), "Fixed-Key Table Segments not supported in this mock.");
         return CompletableFuture.runAsync(() -> {
             synchronized (this.tables) {
                 if (this.tables.containsKey(segmentName)) {

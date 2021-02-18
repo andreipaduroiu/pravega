@@ -14,6 +14,7 @@ import io.pravega.common.Exceptions;
 import io.pravega.common.util.ImmutableDate;
 import io.pravega.segmentstore.contracts.AttributeId;
 import io.pravega.segmentstore.contracts.AttributeUpdate;
+import io.pravega.segmentstore.contracts.AttributeUpdateByReference;
 import io.pravega.segmentstore.contracts.AttributeUpdateType;
 import io.pravega.segmentstore.contracts.Attributes;
 import io.pravega.segmentstore.contracts.BadAttributeUpdateException;
@@ -33,6 +34,7 @@ import io.pravega.segmentstore.server.logs.operations.StreamSegmentAppendOperati
 import io.pravega.segmentstore.server.logs.operations.StreamSegmentSealOperation;
 import io.pravega.segmentstore.server.logs.operations.StreamSegmentTruncateOperation;
 import io.pravega.segmentstore.server.logs.operations.UpdateAttributesOperation;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
@@ -459,6 +461,7 @@ class SegmentMetadataUpdateTransaction implements UpdateableSegmentMetadata {
             return;
         }
 
+        ArrayList<AttributeUpdateByReference> byRef = new ArrayList<>();
         for (AttributeUpdate u : attributeUpdates) {
             if (Attributes.isUnmodifiable(u.getAttributeId())) {
                 throw new MetadataUpdateException(this.containerId,
@@ -512,6 +515,19 @@ class SegmentMetadataUpdateTransaction implements UpdateableSegmentMetadata {
                     break;
                 default:
                     throw new BadAttributeUpdateException(this.name, u, !hasValue, "Unexpected update type: " + updateType);
+            }
+
+            if (u instanceof AttributeUpdateByReference) {
+                byRef.add((AttributeUpdateByReference) u);
+            }
+        }
+
+        // Update references. TODO: move this and .Accumulate into a post-process method, after all validations (including offsets) are done.
+        for (AttributeUpdateByReference u : byRef) {
+            if (u.getReference() instanceof AttributeUpdateByReference.SegmentLengthReference) {
+                u.setValue(getLength());
+            } else {
+                throw new BadAttributeUpdateException(this.name, u, false, "Unsupported AttributeValueReference " + u.getReference().getClass().getSimpleName());
             }
         }
     }

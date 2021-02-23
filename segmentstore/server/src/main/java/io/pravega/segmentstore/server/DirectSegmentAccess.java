@@ -13,7 +13,6 @@ import io.pravega.common.util.BufferView;
 import io.pravega.segmentstore.contracts.AttributeId;
 import io.pravega.segmentstore.contracts.AttributeUpdate;
 import io.pravega.segmentstore.contracts.ReadResult;
-import io.pravega.segmentstore.contracts.SegmentProperties;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Map;
@@ -121,14 +120,14 @@ public interface DirectSegmentAccess {
 
     /**
      * Gets information about the Segment.
-     * @see io.pravega.segmentstore.contracts.StreamSegmentStore#getStreamSegmentInfo(String, Duration)
      *
      * @return The requested Segment Info. Note that this result will only contain those attributes that
      * are loaded in memory (if any) or Core Attributes. To ensure that Extended Attributes are also included, you must use
      * getAttributes(), which will fetch all attributes, regardless of where they are currently located.
      * @throws IllegalArgumentException If any of the arguments are invalid.
+     * @see io.pravega.segmentstore.contracts.StreamSegmentStore#getStreamSegmentInfo(String, Duration)
      */
-    SegmentProperties getInfo();
+    SegmentMetadata getInfo();
 
     /**
      * Seals the Segment.

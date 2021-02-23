@@ -933,7 +933,7 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
         @Override
         AttributeId deserialize(ByteArraySegment key) {
             checkKeyLength(key.getLength());
-            return AttributeId.from(new ByteArraySegment(key.getCopy()));
+            return AttributeId.from(key.getCopy());
         }
     }
 

@@ -14,20 +14,20 @@ import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.segmentstore.contracts.AttributeUpdate;
 import io.pravega.segmentstore.contracts.AttributeUpdateType;
+import io.pravega.segmentstore.contracts.Attributes;
 import io.pravega.segmentstore.contracts.SegmentProperties;
 import io.pravega.segmentstore.contracts.StreamSegmentNotExistsException;
 import io.pravega.segmentstore.contracts.tables.IteratorArgs;
+import io.pravega.segmentstore.contracts.tables.TableAttributes;
 import io.pravega.segmentstore.server.tables.ContainerTableExtension;
 import io.pravega.segmentstore.storage.Storage;
 import io.pravega.shared.NameUtils;
 import io.pravega.shared.segment.SegmentToContainerMapper;
-import lombok.extern.slf4j.Slf4j;
-import lombok.val;
-
 import java.io.ByteArrayInputStream;
 import java.text.SimpleDateFormat;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -42,6 +42,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import lombok.extern.slf4j.Slf4j;
+import lombok.val;
 
 import static io.pravega.shared.NameUtils.getMetadataSegmentName;
 
@@ -332,6 +334,20 @@ public class ContainerRecoveryUtils {
 
             // Get the iterator to iterate through all segments in the back up metadata segment
             val tableExtension = containerForBackUpMetadataSegment.getExtension(ContainerTableExtension.class);
+
+            val bmsInfo = container.getStreamSegmentInfo(backUpMetadataSegment, timeout)
+                    .get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            if (bmsInfo.getAttributes().getOrDefault(TableAttributes.INDEX_OFFSET, Attributes.NULL_ATTRIBUTE_VALUE) == Attributes.NULL_ATTRIBUTE_VALUE) {
+                log.info("Back up container metadata segment name: {} does not have INDEX_OFFSET set; setting to segment length.", backUpMetadataSegment);
+                container.updateAttributes(backUpMetadataSegment,
+                        Collections.singletonList(new AttributeUpdate(TableAttributes.INDEX_OFFSET, AttributeUpdateType.Replace, bmsInfo.getLength())), timeout)
+                        .get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+                val bmsMetadata = container.getMetadata().getStreamSegmentMetadata(container.getMetadata().getStreamSegmentId(backUpMetadataSegment, false));
+                if (bmsMetadata != null) {
+                    bmsMetadata.refreshType();
+                }
+            }
+
             val entryIterator = tableExtension.entryIterator(backUpMetadataSegment, args)
                     .get(timeout.toMillis(), TimeUnit.MILLISECONDS);
 

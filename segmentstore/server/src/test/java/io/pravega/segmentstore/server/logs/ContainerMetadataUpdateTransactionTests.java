@@ -460,14 +460,14 @@ public class ContainerMetadataUpdateTransactionTests {
 
         // Update #1.
         Collection<AttributeUpdate> attributeUpdates = Arrays.asList(
-                new AttributeUpdate(referenceAttributeId, AttributeUpdateType.Accumulate, 1),
+                new AttributeUpdate(referenceAttributeId, AttributeUpdateType.Accumulate, 2),
                 new AttributeUpdateByReference(attributeSegmentLength, AttributeUpdateType.None,
-                        new AttributeUpdateByReference.SegmentLengthReference()));
+                        new AttributeUpdateByReference.SegmentLengthReference(5)));
 
         Map<AttributeId, Long> expectedValues = ImmutableMap.of(
                 Attributes.ATTRIBUTE_SEGMENT_TYPE, DEFAULT_TYPE.getValue(),
-                referenceAttributeId, initialAttributeValue + 1,
-                attributeSegmentLength, SEGMENT_LENGTH);
+                referenceAttributeId, initialAttributeValue + 2,
+                attributeSegmentLength, SEGMENT_LENGTH + 5);
 
         Operation op = createOperation.apply(attributeUpdates);
         txn.preProcessOperation(op);

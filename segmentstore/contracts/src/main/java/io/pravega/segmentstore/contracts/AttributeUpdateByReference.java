@@ -11,6 +11,7 @@ package io.pravega.segmentstore.contracts;
 
 import com.google.common.base.Preconditions;
 import javax.annotation.concurrent.NotThreadSafe;
+import lombok.Data;
 import lombok.Getter;
 
 /**
@@ -100,7 +101,13 @@ public class AttributeUpdateByReference extends AttributeUpdate {
     /**
      * Represents a {@link AttributeValueReference} that maps to the current length of the Segment.
      */
+    @Data
     public static class SegmentLengthReference implements AttributeValueReference {
+        /**
+         * The offset to apply to the Segment's Length.
+         * For example, if Segment Length is 100, and offset is -5, then this will evaluate to 100 - 5 = 95.
+         */
+        private final long offset;
     }
 
     //endregion

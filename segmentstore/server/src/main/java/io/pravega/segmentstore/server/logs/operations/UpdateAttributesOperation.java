@@ -12,7 +12,6 @@ package io.pravega.segmentstore.server.logs.operations;
 import com.google.common.base.Preconditions;
 import io.pravega.common.io.serialization.RevisionDataInput;
 import io.pravega.common.io.serialization.RevisionDataOutput;
-import io.pravega.common.util.ByteArraySegment;
 import io.pravega.segmentstore.contracts.AttributeId;
 import io.pravega.segmentstore.contracts.AttributeUpdate;
 import io.pravega.segmentstore.contracts.AttributeUpdateType;
@@ -161,7 +160,7 @@ public class UpdateAttributesOperation extends MetadataOperation implements Attr
 
         private AttributeUpdate readAttributeUpdate01(RevisionDataInput source) throws IOException {
             return new AttributeUpdate(
-                    AttributeId.from(new ByteArraySegment(source.readArray())),
+                    AttributeId.from(source.readArray()),
                     AttributeUpdateType.get(source.readByte()),
                     source.readLong(),
                     Long.MIN_VALUE); // We do not encode this for serialization, so we don't care about it upon deserialization.

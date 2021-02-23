@@ -46,7 +46,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import lombok.Data;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
@@ -56,17 +55,15 @@ import lombok.val;
  * Hash-based Table Segment Layout.
  * (This is the classical Table Segment).
  */
-public class HashTableSegmentLayout extends TableSegmentLayout {
+class HashTableSegmentLayout extends TableSegmentLayout {
     private final KeyHasher hasher;
     private final ContainerSortedKeyIndex sortedKeyIndex;
     private final ContainerKeyIndex keyIndex;
-    private final Config config;
 
-    public HashTableSegmentLayout(SegmentContainer segmentContainer, @NonNull CacheManager cacheManager, KeyHasher hasher,
-                                  Config config, ScheduledExecutorService executorService) {
-        super(segmentContainer, executorService);
+    HashTableSegmentLayout(SegmentContainer segmentContainer, @NonNull CacheManager cacheManager, KeyHasher hasher,
+                           Config config, ScheduledExecutorService executorService) {
+        super(segmentContainer, config, executorService);
         this.hasher = hasher;
-        this.config = config;
         this.sortedKeyIndex = createSortedIndex();
         this.keyIndex = new ContainerKeyIndex(segmentContainer.getId(), cacheManager, this.sortedKeyIndex, this.hasher, this.executor);
     }
@@ -79,11 +76,6 @@ public class HashTableSegmentLayout extends TableSegmentLayout {
     @Override
     public void close() {
         this.keyIndex.close();
-    }
-
-    private void ensureSegmentType(String segmentName, SegmentType segmentType) {
-        Preconditions.checkArgument(segmentType.isTableSegment() && !segmentType.isFixedKeyTableSegment(),
-                "HashTableSegment can only be used for variable-key Table Segments; Segment '%s' is '%s;.", segmentName, segmentType);
     }
 
     @Override
@@ -121,6 +113,7 @@ public class HashTableSegmentLayout extends TableSegmentLayout {
 
     private CompletableFuture<List<Long>> put(@NonNull DirectSegmentAccess segment, @NonNull List<TableEntry> entries, boolean external, long tableSegmentOffset, TimeoutTimer timer) {
         val segmentInfo = segment.getInfo();
+        ensureSegmentType(segmentInfo.getName(), segmentInfo.getType());
         val toUpdate = translateItems(entries, segmentInfo, external, KeyTranslator::inbound);
 
         // Generate an Update Batch for all the entries (since we need to know their Key Hashes and relative
@@ -145,6 +138,7 @@ public class HashTableSegmentLayout extends TableSegmentLayout {
 
     private CompletableFuture<Void> remove(@NonNull DirectSegmentAccess segment, @NonNull Collection<TableKey> keys, boolean external, long tableSegmentOffset, TimeoutTimer timer) {
         val segmentInfo = segment.getInfo();
+        ensureSegmentType(segmentInfo.getName(), segmentInfo.getType());
         val toRemove = translateItems(keys, segmentInfo, external, KeyTranslator::inbound);
         val removeBatch = batch(toRemove, key -> key, this.serializer::getRemovalLength, TableKeyBatch.removal());
         logRequest("remove", segmentInfo.getName(), removeBatch.isConditional(), removeBatch.isRemoval(),
@@ -167,6 +161,7 @@ public class HashTableSegmentLayout extends TableSegmentLayout {
 
     private CompletableFuture<List<TableEntry>> get(@NonNull DirectSegmentAccess segment, @NonNull List<BufferView> keys, boolean external, TimeoutTimer timer) {
         val segmentInfo = segment.getInfo();
+        ensureSegmentType(segmentInfo.getName(), segmentInfo.getType());
         val toGet = translateItems(keys, segmentInfo, external, KeyTranslator::inbound);
         val resultBuilder = new GetResultBuilder(toGet, this.hasher);
         return this.keyIndex.getBucketOffsets(segment, resultBuilder.getHashes(), timer)
@@ -202,45 +197,50 @@ public class HashTableSegmentLayout extends TableSegmentLayout {
 
     @Override
     CompletableFuture<AsyncIterator<IteratorItem<TableKey>>> keyIterator(@NonNull DirectSegmentAccess segment, IteratorArgs args) {
-        if (ContainerSortedKeyIndex.isSortedTableSegment(segment.getInfo())) {
-            logRequest("keyIterator", segment.getSegmentId(), "sorted");
+        val segmentInfo = segment.getInfo();
+        ensureSegmentType(segmentInfo.getName(), segmentInfo.getType());
+        if (ContainerSortedKeyIndex.isSortedTableSegment(segmentInfo)) {
+            logRequest("keyIterator", segmentInfo.getName(), "sorted");
             return newSortedIterator(segment, args,
                     keys -> CompletableFuture.completedFuture(keys.stream().map(TableKey::unversioned).collect(Collectors.toList())));
         } else {
-            logRequest("keyIterator", segment.getSegmentId(), "hash");
+            logRequest("keyIterator", segmentInfo.getName(), "hash");
             return newHashIterator(segment, args, TableBucketReader::key, KeyTranslator::outbound);
         }
     }
 
     @Override
     CompletableFuture<AsyncIterator<IteratorItem<TableEntry>>> entryIterator(@NonNull DirectSegmentAccess segment, IteratorArgs args) {
-        if (ContainerSortedKeyIndex.isSortedTableSegment(segment.getInfo())) {
-            logRequest("entryIterator", segment.getSegmentId(), "sorted");
+        val segmentInfo = segment.getInfo();
+        ensureSegmentType(segmentInfo.getName(), segmentInfo.getType());
+        if (ContainerSortedKeyIndex.isSortedTableSegment(segmentInfo)) {
+            logRequest("entryIterator", segmentInfo.getName(), "sorted");
             return newSortedIterator(segment, args, keys -> get(segment, keys, new TimeoutTimer(args.getFetchTimeout())));
         } else {
-            logRequest("entryIterator", segment.getSegmentId(), "hash");
+            logRequest("entryIterator", segmentInfo.getName(), "hash");
             return newHashIterator(segment, args, TableBucketReader::entry, KeyTranslator::outbound);
         }
     }
 
     @Override
     AsyncIterator<IteratorItem<TableEntry>> entryDeltaIterator(@NonNull DirectSegmentAccess segment, long fromPosition, Duration fetchTimeout) {
-        SegmentProperties properties = segment.getInfo();
-        if (ContainerSortedKeyIndex.isSortedTableSegment(properties)) {
+        val segmentInfo = segment.getInfo();
+        ensureSegmentType(segmentInfo.getName(), segmentInfo.getType());
+        if (ContainerSortedKeyIndex.isSortedTableSegment(segmentInfo)) {
             throw new UnsupportedOperationException("Unable to use a delta iterator on a sorted TableSegment.");
         }
-        Preconditions.checkArgument(fromPosition <= properties.getLength(), "fromPosition (%s) can not exceed the length (%s) of the TableSegment.",
-                fromPosition, properties.getLength());
+        Preconditions.checkArgument(fromPosition <= segmentInfo.getLength(), "fromPosition (%s) can not exceed the length (%s) of the TableSegment.",
+                fromPosition, segmentInfo.getLength());
 
         logRequest("entryDeltaIterator", segment.getSegmentId(), fromPosition);
 
-        long compactionOffset = properties.getAttributes().getOrDefault(TableAttributes.COMPACTION_OFFSET, 0L);
+        long compactionOffset = segmentInfo.getAttributes().getOrDefault(TableAttributes.COMPACTION_OFFSET, 0L);
         // All of the most recent keys will exist beyond the compactionOffset.
         long startOffset = Math.max(fromPosition, compactionOffset);
         // We should clear if the starting position may have been truncated out due to compaction.
         boolean shouldClear = fromPosition < compactionOffset;
         // Maximum length of the TableSegment we want to read until.
-        int maxBytesToRead = (int) (properties.getLength() - startOffset);
+        int maxBytesToRead = (int) (segmentInfo.getLength() - startOffset);
         TableEntryDeltaIterator.ConvertResult<IteratorItem<TableEntry>> converter = item ->
                 CompletableFuture.completedFuture(new IteratorItemImpl<TableEntry>(
                         item.getKey().serialize(),
@@ -368,6 +368,11 @@ public class HashTableSegmentLayout extends TableSegmentLayout {
         return item == null ? null : translateItem.apply(translator, item);
     }
 
+    private void ensureSegmentType(String segmentName, SegmentType segmentType) {
+        Preconditions.checkArgument(segmentType.isTableSegment() && !segmentType.isFixedKeyTableSegment(),
+                "HashTableSegment can only be used for variable-key Table Segments; Segment '%s' is '%s;.", segmentName, segmentType);
+    }
+
     //region TableWriterConnector
 
     @RequiredArgsConstructor
@@ -454,12 +459,6 @@ public class HashTableSegmentLayout extends TableSegmentLayout {
     //endregion
 
     //region IteratorItemImpl
-
-    @Data
-    private static class IteratorItemImpl<T> implements IteratorItem<T> {
-        private final BufferView state;
-        private final Collection<T> entries;
-    }
 
     @FunctionalInterface
     private interface GetBucketReader<T> {

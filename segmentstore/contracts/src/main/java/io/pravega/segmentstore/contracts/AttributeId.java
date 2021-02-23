@@ -10,8 +10,11 @@
 package io.pravega.segmentstore.contracts;
 
 import com.google.common.annotations.VisibleForTesting;
+import io.pravega.common.util.ArrayView;
+import io.pravega.common.util.BitConverter;
 import io.pravega.common.util.BufferViewComparator;
 import io.pravega.common.util.ByteArraySegment;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
@@ -45,13 +48,13 @@ public abstract class AttributeId implements Comparable<AttributeId> {
     }
 
     /**
-     * Creates a new {@link AttributeId.Variable} using the given {@link ByteArraySegment}.
+     * Creates a new {@link AttributeId.Variable} using the given byte array.
      *
-     * @param data The {@link ByteArraySegment} to wrap. NOTE: this will not be duplicated. Any changes to the underlying
+     * @param data The byte array to wrap. NOTE: this will not be duplicated. Any changes to the underlying
      *             buffer will be reflected in this Attribute, which may have unintended consequences.
      * @return A new instance of {@link AttributeId.Variable}.
      */
-    public static AttributeId from(ByteArraySegment data) {
+    public static AttributeId from(byte[] data) {
         return new Variable(data);
     }
 
@@ -83,6 +86,8 @@ public abstract class AttributeId implements Comparable<AttributeId> {
      */
     public abstract long getBitGroup(int position);
 
+    public abstract AttributeId nextValue();
+
     public java.util.UUID toUUID() {
         if (!isUUID()) {
             throw new UnsupportedOperationException(String.format("toUUID() invoked with byteCount() == %s. Required: %s.", byteCount(), UUID_KEY_LENGTH));
@@ -112,8 +117,8 @@ public abstract class AttributeId implements Comparable<AttributeId> {
      * A 16-byte {@link AttributeId} that maps to a {@link UUID}.
      */
     @Getter
-    @RequiredArgsConstructor
-    static final class UUID extends AttributeId {
+    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
+    public static final class UUID extends AttributeId {
         private final long mostSignificantBits;
         private final long leastSignificantBits;
 
@@ -141,6 +146,24 @@ public abstract class AttributeId implements Comparable<AttributeId> {
                 default:
                     throw new IllegalArgumentException(this.getClass().getName() + " only supports bit groups 0 and 1. Requested: " + position);
             }
+        }
+
+        @Override
+        public AttributeId nextValue() {
+            long msb = this.mostSignificantBits;
+            long lsb = this.leastSignificantBits;
+            if (lsb == Long.MAX_VALUE) {
+                if (msb == Long.MAX_VALUE) {
+                    return null;
+                }
+
+                msb++;
+                lsb = Long.MIN_VALUE;
+            } else {
+                lsb++;
+            }
+
+            return new AttributeId.UUID(msb, lsb);
         }
 
         @Override
@@ -192,30 +215,41 @@ public abstract class AttributeId implements Comparable<AttributeId> {
      * A 16-byte {@link AttributeId} that maps to a {@link UUID}.
      */
     @Getter
-    @RequiredArgsConstructor
-    static final class Variable extends AttributeId {
+    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
+    public static final class Variable extends AttributeId {
         private static final BufferViewComparator COMPARATOR = BufferViewComparator.create();
         @NonNull
-        private final ByteArraySegment data; // TODO: ArrayView or BufferView? Or leave it as-is?
+        private final byte[] data; // TODO: ArrayView or BufferView? Or leave it as-is?
 
         @Override
         public boolean isUUID() {
-            return this.data.getLength() == UUID_KEY_LENGTH;
+            return this.data.length == UUID_KEY_LENGTH;
         }
 
         @Override
         public int byteCount() {
-            return this.data.getLength();
+            return this.data.length;
         }
 
         @Override
         public long getBitGroup(int position) {
-            return this.data.getLong(position << 3); // This will do necessary checks for us.
+            return BitConverter.readLong(this.data, position << 3); // This will do necessary checks for us.
+        }
+
+        @Override
+        public AttributeId nextValue() {
+            ArrayView next = BufferViewComparator.getNextItemOfSameLength(new ByteArraySegment(this.data));
+            if (next == null) {
+                return null;
+            } else {
+                assert next.arrayOffset() == 0 && next.getLength() == next.array().length;
+                return new AttributeId.Variable(next.array());
+            }
         }
 
         @Override
         public ByteArraySegment toBuffer() {
-            return this.data;
+            return new ByteArraySegment(this.data);
         }
 
         @Override
@@ -241,6 +275,14 @@ public abstract class AttributeId implements Comparable<AttributeId> {
         @Override
         public String toString() {
             return this.data.toString();
+        }
+
+        public static AttributeId minValue(int length) {
+            return new AttributeId.Variable(BufferViewComparator.getMinValue(length));
+        }
+
+        public static AttributeId maxValue(int length) {
+            return new AttributeId.Variable(BufferViewComparator.getMaxValue(length));
         }
     }
 

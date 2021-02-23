@@ -525,7 +525,7 @@ class SegmentMetadataUpdateTransaction implements UpdateableSegmentMetadata {
         // Update references. TODO: move this and .Accumulate into a post-process method, after all validations (including offsets) are done.
         for (AttributeUpdateByReference u : byRef) {
             if (u.getReference() instanceof AttributeUpdateByReference.SegmentLengthReference) {
-                u.setValue(getLength());
+                u.setValue(getLength() + ((AttributeUpdateByReference.SegmentLengthReference) u.getReference()).getOffset());
             } else {
                 throw new BadAttributeUpdateException(this.name, u, false, "Unsupported AttributeValueReference " + u.getReference().getClass().getSimpleName());
             }

@@ -42,16 +42,18 @@ abstract class TableSegmentLayout implements AutoCloseable {
     /**
      * Default value used for when no offset is provided for a remove or put call.
      */
-    protected static final int NO_OFFSET = -1;
+    protected static final long NO_OFFSET = -1;
     protected static final int MAX_BATCH_SIZE = 32 * EntrySerializer.MAX_SERIALIZATION_LENGTH;
 
     protected final SegmentContainer segmentContainer;
     protected final ScheduledExecutorService executor;
     protected final EntrySerializer serializer;
+    protected final Config config;
     protected final String traceObjectId;
 
-    protected TableSegmentLayout(@NonNull SegmentContainer segmentContainer, @NonNull ScheduledExecutorService executor) {
+    protected TableSegmentLayout(@NonNull SegmentContainer segmentContainer, @NonNull Config config, @NonNull ScheduledExecutorService executor) {
         this.segmentContainer = segmentContainer;
+        this.config = config;
         this.executor = executor;
         this.serializer = new EntrySerializer();
         this.traceObjectId = String.format("TableExtensionImpl[%s]", segmentContainer.getId());
@@ -86,6 +88,11 @@ abstract class TableSegmentLayout implements AutoCloseable {
         log.debug("{}: {} {}", this.traceObjectId, requestName, args);
     }
 
+    @Data
+    protected static class IteratorItemImpl<T> implements IteratorItem<T> {
+        private final BufferView state;
+        private final Collection<T> entries;
+    }
 
     @Data
     @AllArgsConstructor

@@ -18,7 +18,6 @@ import io.pravega.segmentstore.contracts.AttributeUpdate;
 import io.pravega.segmentstore.contracts.Attributes;
 import io.pravega.segmentstore.contracts.BadAttributeUpdateException;
 import io.pravega.segmentstore.contracts.ReadResult;
-import io.pravega.segmentstore.contracts.SegmentProperties;
 import io.pravega.segmentstore.server.AttributeIterator;
 import io.pravega.segmentstore.server.DirectSegmentAccess;
 import io.pravega.segmentstore.server.SegmentMetadata;
@@ -238,7 +237,7 @@ class SegmentMock implements DirectSegmentAccess {
     }
 
     @Override
-    public synchronized SegmentProperties getInfo() {
+    public synchronized SegmentMetadata getInfo() {
         return this.metadata;
     }
 

@@ -14,16 +14,16 @@ import io.pravega.common.util.ArrayView;
 import io.pravega.segmentstore.server.DebugSegmentContainer;
 import io.pravega.segmentstore.server.OperationLogFactory;
 import io.pravega.segmentstore.server.ReadIndexFactory;
+import io.pravega.segmentstore.server.SegmentContainerExtension;
 import io.pravega.segmentstore.server.SegmentContainerFactory;
+import io.pravega.segmentstore.server.UpdateableContainerMetadata;
 import io.pravega.segmentstore.server.WriterFactory;
 import io.pravega.segmentstore.server.attributes.AttributeIndexFactory;
 import io.pravega.segmentstore.storage.StorageFactory;
-import io.pravega.segmentstore.server.SegmentContainerExtension;
-import lombok.extern.slf4j.Slf4j;
-
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class DebugStreamSegmentContainer extends StreamSegmentContainer implements DebugSegmentContainer {
@@ -57,5 +57,9 @@ public class DebugStreamSegmentContainer extends StreamSegmentContainer implemen
     public CompletableFuture<Void> registerSegment(String streamSegmentName, long length, boolean isSealed) {
         ArrayView segmentInfo = MetadataStore.SegmentInfo.recoveredSegment(streamSegmentName, length, isSealed);
         return metadataStore.createSegment(streamSegmentName, segmentInfo, new TimeoutTimer(TIMEOUT));
+    }
+
+    final UpdateableContainerMetadata getMetadata() {
+        return super.metadata;
     }
 }

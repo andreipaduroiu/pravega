@@ -100,7 +100,7 @@ public class StreamSegmentAppendOperation2 extends StreamSegmentAppendOperation 
 
         private AttributeUpdate readAttributeUpdate00(RevisionDataInput source) throws IOException {
             return new AttributeUpdate(
-                    AttributeId.from(new ByteArraySegment(source.readArray())),
+                    AttributeId.from(source.readArray()),
                     AttributeUpdateType.get(source.readByte()),
                     source.readLong(),
                     Long.MIN_VALUE); // We do not encode this for serialization, so we don't care about it upon deserialization.

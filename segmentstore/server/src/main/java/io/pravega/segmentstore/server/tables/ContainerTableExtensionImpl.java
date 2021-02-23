@@ -28,6 +28,7 @@ import io.pravega.segmentstore.contracts.tables.TableKey;
 import io.pravega.segmentstore.contracts.tables.TableSegmentConfig;
 import io.pravega.segmentstore.server.CacheManager;
 import io.pravega.segmentstore.server.SegmentContainer;
+import io.pravega.segmentstore.server.SegmentMetadata;
 import io.pravega.segmentstore.server.UpdateableSegmentMetadata;
 import io.pravega.segmentstore.server.WriterSegmentProcessor;
 import java.time.Duration;
@@ -68,6 +69,7 @@ public class ContainerTableExtensionImpl implements ContainerTableExtension {
     private final SegmentContainer segmentContainer;
     private final ScheduledExecutorService executor;
     private final TableSegmentLayout.Config layoutConfig;
+    private final FixedKeyTableSegmentLayout fixedKeyLayout;
     private final HashTableSegmentLayout hashTableLayout;
     private final AtomicBoolean closed;
     private final String traceObjectId;
@@ -102,6 +104,7 @@ public class ContainerTableExtensionImpl implements ContainerTableExtension {
         this.executor = executor;
         this.layoutConfig = new TableSegmentLayout.Config(DEFAULT_MAX_COMPACTION_SIZE);
         this.hashTableLayout = new HashTableSegmentLayout(this.segmentContainer, cacheManager, hasher, this.layoutConfig, this.executor);
+        this.fixedKeyLayout = new FixedKeyTableSegmentLayout(this.segmentContainer, this.layoutConfig, this.executor);
         this.closed = new AtomicBoolean();
         this.traceObjectId = String.format("TableExtension[%d]", this.segmentContainer.getId());
     }
@@ -114,6 +117,7 @@ public class ContainerTableExtensionImpl implements ContainerTableExtension {
     public void close() {
         if (!this.closed.getAndSet(true)) {
             this.hashTableLayout.close();
+            this.fixedKeyLayout.close();
             log.info("{}: Closed.", this.traceObjectId);
         }
     }
@@ -130,7 +134,26 @@ public class ContainerTableExtensionImpl implements ContainerTableExtension {
             return Collections.emptyList();
         }
 
-        return this.hashTableLayout.createWriterSegmentProcessors(metadata);
+        return selectLayout(metadata).createWriterSegmentProcessors(metadata);
+    }
+
+    private TableSegmentLayout selectLayout(SegmentMetadata segmentMetadata) {
+        SegmentType type = segmentMetadata.getType();
+        if (!type.isTableSegment()) {
+            type = SegmentType.fromAttributes(segmentMetadata.getAttributes());
+        }
+
+        return selectLayout(segmentMetadata.getName(), type);
+    }
+
+    private TableSegmentLayout selectLayout(String segmentName, SegmentType segmentType) {
+        if (segmentType.isFixedKeyTableSegment()) {
+            return this.fixedKeyLayout;
+        } else if (segmentType.isTableSegment()) {
+            return this.hashTableLayout;
+        }
+
+        throw new IllegalArgumentException(String.format("Segment Type '%s' not supported (Segment = '%s').", segmentType, segmentName));
     }
 
     //endregion
@@ -143,7 +166,7 @@ public class ContainerTableExtensionImpl implements ContainerTableExtension {
         segmentType = SegmentType.builder(segmentType).tableSegment().build(); // Ensure at least a TableSegment type.
         val attributes = new HashMap<>(TableAttributes.DEFAULT_VALUES);
         attributes.putAll(DEFAULT_COMPACTION_ATTRIBUTES);
-        this.hashTableLayout.setNewSegmentAttributes(segmentType, config, attributes);
+        selectLayout(segmentName, segmentType).setNewSegmentAttributes(segmentType, config, attributes);
         val attributeUpdates = attributes
                 .entrySet().stream()
                 .map(e -> new AttributeUpdate(e.getKey(), AttributeUpdateType.None, e.getValue()))
@@ -156,7 +179,7 @@ public class ContainerTableExtensionImpl implements ContainerTableExtension {
     public CompletableFuture<Void> deleteSegment(@NonNull String segmentName, boolean mustBeEmpty, Duration timeout) {
         Exceptions.checkNotClosed(this.closed.get(), this);
         logRequest("deleteSegment", segmentName, mustBeEmpty);
-        return this.hashTableLayout.deleteSegment(segmentName, mustBeEmpty, timeout);
+        return this.hashTableLayout.deleteSegment(segmentName, mustBeEmpty, timeout); // TODO selectLayout. Requires SegmentMetadata...
     }
 
     @Override
@@ -182,7 +205,7 @@ public class ContainerTableExtensionImpl implements ContainerTableExtension {
         TimeoutTimer timer = new TimeoutTimer(timeout);
         return this.segmentContainer
                 .forSegment(segmentName, timer.getRemaining())
-                .thenComposeAsync(segment -> this.hashTableLayout.put(segment, entries, tableSegmentOffset, timer), this.executor);
+                .thenComposeAsync(segment -> selectLayout(segment.getInfo()).put(segment, entries, tableSegmentOffset, timer), this.executor);
     }
 
     @Override
@@ -196,7 +219,7 @@ public class ContainerTableExtensionImpl implements ContainerTableExtension {
         TimeoutTimer timer = new TimeoutTimer(timeout);
         return this.segmentContainer
                 .forSegment(segmentName, timer.getRemaining())
-                .thenComposeAsync(segment -> this.hashTableLayout.remove(segment, keys, tableSegmentOffset, timer), this.executor);
+                .thenComposeAsync(segment -> selectLayout(segment.getInfo()).remove(segment, keys, tableSegmentOffset, timer), this.executor);
     }
 
     @Override
@@ -205,28 +228,28 @@ public class ContainerTableExtensionImpl implements ContainerTableExtension {
         TimeoutTimer timer = new TimeoutTimer(timeout);
         return this.segmentContainer
                 .forSegment(segmentName, timer.getRemaining())
-                .thenComposeAsync(segment -> this.hashTableLayout.get(segment, keys, timer), this.executor);
+                .thenComposeAsync(segment -> selectLayout(segment.getInfo()).get(segment, keys, timer), this.executor);
     }
 
     @Override
     public CompletableFuture<AsyncIterator<IteratorItem<TableKey>>> keyIterator(String segmentName, IteratorArgs args) {
         Exceptions.checkNotClosed(this.closed.get(), this);
         return this.segmentContainer.forSegment(segmentName, args.getFetchTimeout())
-                .thenComposeAsync(segment -> this.hashTableLayout.keyIterator(segment, args), this.executor);
+                .thenComposeAsync(segment -> selectLayout(segment.getInfo()).keyIterator(segment, args), this.executor);
     }
 
     @Override
     public CompletableFuture<AsyncIterator<IteratorItem<TableEntry>>> entryIterator(String segmentName, IteratorArgs args) {
         Exceptions.checkNotClosed(this.closed.get(), this);
         return this.segmentContainer.forSegment(segmentName, args.getFetchTimeout())
-                .thenComposeAsync(segment -> this.hashTableLayout.entryIterator(segment, args), this.executor);
+                .thenComposeAsync(segment -> selectLayout(segment.getInfo()).entryIterator(segment, args), this.executor);
     }
 
     @Override
     public CompletableFuture<AsyncIterator<IteratorItem<TableEntry>>> entryDeltaIterator(String segmentName, long fromPosition, Duration fetchTimeout) {
         Exceptions.checkNotClosed(this.closed.get(), this);
         return this.segmentContainer.forSegment(segmentName, fetchTimeout)
-                .thenApplyAsync(segment -> this.hashTableLayout.entryDeltaIterator(segment, fromPosition, fetchTimeout), this.executor);
+                .thenApplyAsync(segment -> selectLayout(segment.getInfo()).entryDeltaIterator(segment, fromPosition, fetchTimeout), this.executor);
     }
 
     //endregion

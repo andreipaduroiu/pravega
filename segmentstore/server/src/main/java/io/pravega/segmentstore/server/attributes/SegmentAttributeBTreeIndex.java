@@ -915,7 +915,7 @@ class SegmentAttributeBTreeIndex implements AttributeIndex, CacheManager.Client,
         abstract AttributeId deserialize(ByteArraySegment key);
 
         protected void checkKeyLength(int length) {
-            Preconditions.checkArgument(length == DEFAULT_KEY_LENGTH, "Expected key length %s, given %s.", DEFAULT_KEY_LENGTH, length);
+            Preconditions.checkArgument(length == getKeyLength(), "Expected key length %s, given %s.", getKeyLength(), length);
         }
     }
 

@@ -19,6 +19,7 @@ import io.pravega.segmentstore.contracts.tables.IteratorArgs;
 import io.pravega.segmentstore.contracts.tables.IteratorItem;
 import io.pravega.segmentstore.contracts.tables.TableEntry;
 import io.pravega.segmentstore.contracts.tables.TableKey;
+import io.pravega.segmentstore.contracts.tables.TableSegmentConfig;
 import io.pravega.segmentstore.contracts.tables.TableStore;
 import io.pravega.segmentstore.server.containers.ContainerConfig;
 import io.pravega.segmentstore.server.logs.DurableLogConfig;
@@ -33,6 +34,7 @@ import io.pravega.test.common.AssertExtensions;
 import io.pravega.test.common.ThreadPooledTestSuite;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -69,7 +71,10 @@ public class TableServiceTests extends ThreadPooledTestSuite {
     private static final int KEY_COUNT = 1000;
     private static final int MAX_KEY_LENGTH = 128;
     private static final int MAX_VALUE_LENGTH = 32;
+    private static final int[] FIXED_KEY_LENGTHS = new int[]{8, 16, 32, 64, 128, 256};
     private static final String TABLE_SEGMENT_NAME_PREFIX = "TableSegment_";
+    private static final String TABLE_SEGMENT_SORTED_NAME_PREFIX = "TableSegmentSorted_";
+    private static final String TABLE_SEGMENT_FIXED_KEY_NAME_PREFIX = "TableSegmentFixedKey_";
     private static final Comparator<BufferView> KEY_COMPARATOR = BufferViewComparator.create()::compare;
     private static final Duration TIMEOUT = Duration.ofSeconds(30); // Individual call timeout
     @Rule
@@ -79,7 +84,7 @@ public class TableServiceTests extends ThreadPooledTestSuite {
             .builder()
             .include(ServiceConfig
                     .builder()
-                    .with(ServiceConfig.CONTAINER_COUNT, 4)
+                    .with(ServiceConfig.CONTAINER_COUNT, 1)
                     .with(ServiceConfig.THREAD_POOL_SIZE, THREADPOOL_SIZE_SEGMENT_STORE)
                     .with(ServiceConfig.STORAGE_THREAD_POOL_SIZE, THREADPOOL_SIZE_SEGMENT_STORE_STORAGE)
                     .with(ServiceConfig.CACHE_POLICY_MAX_SIZE, 16 * 1024 * 1024L)
@@ -141,6 +146,7 @@ public class TableServiceTests extends ThreadPooledTestSuite {
     @Test
     public void testEndToEnd() throws Exception {
         val rnd = new Random(0);
+        val segmentTypes = new SegmentType[]{SegmentType.builder().tableSegment().build(), SegmentType.builder().sortedTableSegment().build(), SegmentType.builder().fixedKeyTableSegment().build()};
         ArrayList<String> segmentNames;
         HashMap<BufferView, EntryData> keyInfo;
 
@@ -150,11 +156,122 @@ public class TableServiceTests extends ThreadPooledTestSuite {
             val tableStore = builder.createTableStoreService();
 
             // Create the Table Segments.
-            segmentNames = createSegments(tableStore);
+            segmentNames = createSegments(tableStore, segmentTypes);
             log.info("Created Segments: {}.", String.join(", ", segmentNames));
 
             // Generate the keys and map them to segments.
-            keyInfo = mapToSegments(generateKeys(rnd), segmentNames);
+            keyInfo = generateKeysForSegments(segmentNames, rnd);
+
+            // Unconditional updates.
+            val updates = generateUpdates(keyInfo, false, rnd);
+            val updateVersions = executeUpdates(updates, tableStore);
+            acceptUpdates(updates, updateVersions, keyInfo);
+            log.info("Finished unconditional updates.");
+
+            // Check.
+            check(keyInfo, tableStore);
+
+            log.info("Finished Phase 1");
+        }
+
+        // Phase 2: Force a recovery and remove all data (unconditionally)
+        log.info("Starting Phase 2");
+        try (val builder = createBuilder()) {
+            val tableStore = builder.createTableStoreService();
+
+            // Check (after recovery)
+            check(keyInfo, tableStore);
+
+            // Unconditional removals.
+            val removals = generateRemovals(keyInfo, false);
+            executeRemovals(removals, tableStore);
+            acceptRemovals(removals, keyInfo);
+
+            // Check.
+            check(keyInfo, tableStore);
+
+            log.info("Finished Phase 2");
+        }
+
+        // Phase 3: Force a recovery and conditionally update and remove data
+        log.info("Starting Phase 3");
+        try (val builder = createBuilder()) {
+            val tableStore = builder.createTableStoreService();
+
+            // Check (after recovery).
+            check(keyInfo, tableStore);
+
+            // Conditional update.
+            val updates = generateUpdates(keyInfo, true, rnd);
+            val updateVersions = executeUpdates(updates, tableStore);
+            acceptUpdates(updates, updateVersions, keyInfo);
+
+            val offsetConditionedUpdates = generateUpdates(keyInfo, true, rnd);
+            val offsetUpdateVersions = executeOffsetConditionalUpdates(offsetConditionedUpdates, -1L, tableStore);
+            acceptUpdates(offsetConditionedUpdates, offsetUpdateVersions, keyInfo);
+            log.info("Finished conditional updates.");
+
+            // Check.
+            check(keyInfo, tableStore);
+
+            // Conditional remove.
+            val removals = generateRemovals(keyInfo, true);
+            executeRemovals(removals, tableStore);
+            acceptRemovals(removals, keyInfo);
+
+            val offsetConditionedRemovals = generateRemovals(keyInfo, true);
+            executeOffsetConditonalRemovals(offsetConditionedRemovals, -1L, tableStore);
+            acceptRemovals(offsetConditionedRemovals, keyInfo);
+            log.info("Finished conditional removes.");
+
+            // Check.
+            check(keyInfo, tableStore);
+
+            log.info("Finished Phase 3");
+        }
+
+        // Phase 4: Force a recovery and conditionally remove all data
+        log.info("Starting Phase 4");
+        try (val builder = createBuilder()) {
+            val tableStore = builder.createTableStoreService();
+
+            // Check (after recovery)
+            check(keyInfo, tableStore);
+
+            // Conditional update again.
+            val updates = generateUpdates(keyInfo, true, rnd);
+            val updateVersions = executeUpdates(updates, tableStore);
+            acceptUpdates(updates, updateVersions, keyInfo);
+            log.info("Finished conditional updates.");
+
+            // Check.
+            check(keyInfo, tableStore);
+
+            // Delete all.
+            val deletions = segmentNames.stream().map(s -> tableStore.deleteSegment(s, false, TIMEOUT)).collect(Collectors.toList());
+            Futures.allOf(deletions).get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+
+            log.info("Finished Phase 4");
+        }
+    }
+
+    @Test
+    public void testEndToEndFixedKeys() throws Exception { // TODO this is redundannt. testEndToEnd incorporates this too.
+        val rnd = new Random(0);
+        ArrayList<String> segmentNames;
+        HashMap<BufferView, EntryData> keyInfo;
+
+        // Phase 1: Create some segments and update some data (unconditionally).
+        log.info("Starting Phase 1");
+        try (val builder = createBuilder()) {
+            val tableStore = builder.createTableStoreService();
+
+            // Create the Table Segments.
+            segmentNames = createSegments(tableStore, SegmentType.builder().fixedKeyTableSegment().build());
+            log.info("Created Segments: {}.", String.join(", ", segmentNames));
+
+            // Generate the keys and map them to segments.
+            keyInfo = generateKeysForSegments(segmentNames, rnd);
 
             // Unconditional updates.
             val updates = generateUpdates(keyInfo, false, rnd);
@@ -281,7 +398,7 @@ public class TableServiceTests extends ThreadPooledTestSuite {
                                 });
                     });
             iteratorFutures.add(future);
-            if (!isSorted(segmentName)) {
+            if (!isSorted(segmentName) && !isFixedKeyLength(segmentName)) {
                 unsortedIteratorFutures.add(future);
                 // For simplicity, always start from beginning of TableSegment.
                 offsetIteratorFutures.add(tableStore.entryDeltaIterator(segmentName, 0L, TIMEOUT)
@@ -303,7 +420,10 @@ public class TableServiceTests extends ThreadPooledTestSuite {
             val actual = actualResults.get(i);
             if (expectedEntry.isDeleted()) {
                 // Deleted keys will be returned as nulls.
-                Assert.assertNull("Not expecting a value for a deleted Key", actual);
+                if (actual != null) {
+                    val r2 = tableStore.get(expectedEntry.segmentName, Collections.singletonList(expectedKey), TIMEOUT).join();
+                }
+                Assert.assertNull("Not expecting a value for a deleted Key ", actual);
             } else {
                 Assert.assertEquals("Unexpected value for non-deleted Key.", expectedEntry.getValue(), actual.getValue());
                 Assert.assertEquals("Unexpected key for non-deleted Key.", expectedKey, actual.getKey().getKey());
@@ -412,7 +532,6 @@ public class TableServiceTests extends ThreadPooledTestSuite {
             TableEntry te = conditional
                     ? TableEntry.versioned(e.getKey(), newValue, ed.getVersion())
                     : TableEntry.unversioned(e.getKey(), newValue);
-
             val segmentUpdate = result.computeIfAbsent(ed.segmentName, ignored -> new ArrayList<>());
             segmentUpdate.add(te);
         }
@@ -459,10 +578,20 @@ public class TableServiceTests extends ThreadPooledTestSuite {
         }
     }
 
-    private HashMap<BufferView, EntryData> mapToSegments(ArrayList<BufferView> keys, ArrayList<String> segments) {
+    private HashMap<BufferView, EntryData> generateKeysForSegments(ArrayList<String> segments, Random rnd) {
         val result = new HashMap<BufferView, EntryData>();
-        for (int i = 0; i < keys.size(); i++) {
-            result.put(keys.get(i), new EntryData(segments.get(i % segments.size())));
+        val keysPerSegment = KEY_COUNT / segments.size();
+        for (val segmentName : segments) {
+            ArrayList<BufferView> keys;
+            if (isFixedKeyLength(segmentName)) {
+                val keyLength = getFixedKeyLength(segmentName);
+                keys = generateKeys(keysPerSegment, keyLength, keyLength, rnd);
+            } else {
+                keys = generateKeys(keysPerSegment, 1, MAX_KEY_LENGTH, rnd);
+            }
+            for (val key : keys) {
+                result.put(key, new EntryData(segmentName));
+            }
         }
 
         return result;
@@ -472,10 +601,10 @@ public class TableServiceTests extends ThreadPooledTestSuite {
         return generateData(0, MAX_VALUE_LENGTH, rnd);
     }
 
-    private ArrayList<BufferView> generateKeys(Random rnd) {
-        val result = new ArrayList<BufferView>(KEY_COUNT);
-        for (int i = 0; i < KEY_COUNT; i++) {
-            result.add(generateData(1, MAX_KEY_LENGTH, rnd));
+    private ArrayList<BufferView> generateKeys(int keyCount, int minKeyLength, int maxKeyLength, Random rnd) {
+        val result = new ArrayList<BufferView>(keyCount);
+        for (int i = 0; i < keyCount; i++) {
+            result.add(generateData(minKeyLength, maxKeyLength, rnd));
         }
 
         return result;
@@ -487,34 +616,51 @@ public class TableServiceTests extends ThreadPooledTestSuite {
         return new ByteArraySegment(keyData);
     }
 
-    private ArrayList<String> createSegments(TableStore store) throws Exception {
+    private ArrayList<String> createSegments(TableStore store, SegmentType... segmentTypes) throws Exception {
         ArrayList<String> segmentNames = new ArrayList<>();
         ArrayList<CompletableFuture<Void>> futures = new ArrayList<>();
         for (int i = 0; i < SEGMENT_COUNT; i++) {
-            String segmentName = getSegmentName(i);
+            val segmentType = segmentTypes[i % segmentTypes.length];
+            String segmentName = getSegmentName(i, segmentType);
             segmentNames.add(segmentName);
-            val segmentType = SegmentType.builder().tableSegment();
-            if (isSorted(i)) {
-                segmentType.sortedTableSegment();
+            val config = TableSegmentConfig.builder();
+            if (segmentType.isFixedKeyTableSegment()) {
+                config.keyLength(getFixedKeyLength(segmentName));
             }
-            futures.add(store.createSegment(segmentName, segmentType.build(), TIMEOUT));
+            futures.add(store.createSegment(segmentName, segmentType, config.build(), TIMEOUT));
         }
 
         Futures.allOf(futures).get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
         return segmentNames;
     }
 
-    private boolean isSorted(int segmentIndex) {
-        return segmentIndex % 2 == 0;
-    }
-
     private boolean isSorted(String segmentName) {
-        assert segmentName.startsWith(TABLE_SEGMENT_NAME_PREFIX) : segmentName;
-        return isSorted(Integer.parseInt(segmentName.substring(TABLE_SEGMENT_NAME_PREFIX.length())));
+        return segmentName.startsWith(TABLE_SEGMENT_SORTED_NAME_PREFIX);
     }
 
-    private static String getSegmentName(int i) {
-        return TABLE_SEGMENT_NAME_PREFIX + i;
+    private boolean isFixedKeyLength(String segmentName) {
+        return segmentName.startsWith(TABLE_SEGMENT_FIXED_KEY_NAME_PREFIX);
+    }
+
+    private int getFixedKeyLength(int segmentIndex) {
+        return FIXED_KEY_LENGTHS[segmentIndex % FIXED_KEY_LENGTHS.length];
+    }
+
+    private int getFixedKeyLength(String segmentName) {
+        assert segmentName.startsWith(TABLE_SEGMENT_FIXED_KEY_NAME_PREFIX) : segmentName;
+        return getFixedKeyLength(Integer.parseInt(segmentName.substring(TABLE_SEGMENT_FIXED_KEY_NAME_PREFIX.length())));
+    }
+
+    private static String getSegmentName(int i, SegmentType segmentType) {
+        if (segmentType.isSortedTableSegment()) {
+            return TABLE_SEGMENT_SORTED_NAME_PREFIX + i;
+        } else if (segmentType.isFixedKeyTableSegment()) {
+            return TABLE_SEGMENT_FIXED_KEY_NAME_PREFIX + i;
+        } else if (segmentType.isTableSegment()) {
+            return TABLE_SEGMENT_NAME_PREFIX + i;
+        }
+
+        throw new IllegalArgumentException(segmentType.toString());
     }
 
     private ServiceBuilder createBuilder() throws Exception {

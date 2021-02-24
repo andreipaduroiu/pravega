@@ -72,6 +72,23 @@ public interface DirectSegmentAccess {
     CompletableFuture<Long> append(BufferView data, Collection<AttributeUpdate> attributeUpdates, long offset, Duration timeout);
 
     /**
+     * Appends a range of bytes at the end of the Segment and atomically updates any attributes provided. The byte range
+     * will be appended as a contiguous block, however there is no guarantee of ordering between different calls to this
+     * method.
+     *
+     * @param append  The {@link SegmentAppend} to add.
+     * @param timeout Timeout for the operation.
+     * @return A CompletableFuture that, when completed normally, will contain the offset at which the data were added. If the
+     * operation failed, the future will be failed with the causing exception.
+     * @throws NullPointerException     If any of the arguments are null, except attributeUpdates.
+     * @throws IllegalArgumentException If the Segment Name is invalid (NOTE: this doesn't
+     *                                  check if the Segment does not exist - that exception will be set in the
+     *                                  returned CompletableFuture).
+     * @see io.pravega.segmentstore.contracts.StreamSegmentStore#append(String, BufferView, Collection, Duration)
+     */
+    CompletableFuture<Long> append(SegmentAppend append, Duration timeout);
+
+    /**
      * Performs an attribute update operation on the Segment.
      *
      *  @see io.pravega.segmentstore.contracts.StreamSegmentStore#append(String, BufferView, Collection, Duration)

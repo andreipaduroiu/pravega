@@ -20,6 +20,7 @@ import io.pravega.segmentstore.contracts.BadAttributeUpdateException;
 import io.pravega.segmentstore.contracts.ReadResult;
 import io.pravega.segmentstore.server.AttributeIterator;
 import io.pravega.segmentstore.server.DirectSegmentAccess;
+import io.pravega.segmentstore.server.SegmentAppend;
 import io.pravega.segmentstore.server.SegmentMetadata;
 import io.pravega.segmentstore.server.UpdateableSegmentMetadata;
 import io.pravega.segmentstore.server.containers.StreamSegmentMetadata;
@@ -127,6 +128,13 @@ class SegmentMock implements DirectSegmentAccess {
 
             return offset;
         }, this.executor);
+    }
+
+    @Override
+    public CompletableFuture<Long> append(SegmentAppend append, Duration timeout) {
+        return append.getOffset() >= 0
+                ? append(append.getData(), append.getAttributeUpdates(), append.getOffset(), timeout)
+                : append(append.getData(), append.getAttributeUpdates(), timeout);
     }
 
     @Override

@@ -35,6 +35,7 @@ import io.pravega.segmentstore.contracts.tables.TableEntry;
 import io.pravega.segmentstore.contracts.tables.TableKey;
 import io.pravega.segmentstore.contracts.tables.TableSegmentConfig;
 import io.pravega.segmentstore.server.DirectSegmentAccess;
+import io.pravega.segmentstore.server.SegmentAppend;
 import io.pravega.segmentstore.server.SegmentContainer;
 import io.pravega.segmentstore.server.UpdateableSegmentMetadata;
 import io.pravega.segmentstore.server.WriterSegmentProcessor;
@@ -114,7 +115,7 @@ class FixedKeyTableSegmentLayout extends TableSegmentLayout {
             val attributeId = AttributeId.from(key.getKey().getCopy());
             val ref = new AttributeUpdateByReference.SegmentLengthReference(batchOffset);
             val au = key.hasVersion()
-                    ? new AttributeUpdateByReference(attributeId, AttributeUpdateType.ReplaceIfEquals, ref, key.getVersion())
+                    ? new AttributeUpdateByReference(attributeId, AttributeUpdateType.ReplaceIfEquals, ref, getCompareVersion(key))
                     : new AttributeUpdateByReference(attributeId, AttributeUpdateType.Replace, ref);
             attributeUpdates.add(au);
             batchOffsets.add(batchOffset);
@@ -122,10 +123,9 @@ class FixedKeyTableSegmentLayout extends TableSegmentLayout {
         }
 
         val serializedEntries = this.serializer.serializeUpdate(entries);
-        val result = tableSegmentOffset == NO_OFFSET
-                ? segment.append(serializedEntries, attributeUpdates, timer.getRemaining()) // TODO Append2
-                : segment.append(serializedEntries, attributeUpdates, tableSegmentOffset, timer.getRemaining()); // TODO Append2
-        return result.thenApply(segmentOffset -> batchOffsets.stream().map(offset -> offset + segmentOffset).collect(Collectors.toList()));
+        val append = newAppend().data(serializedEntries).attributeUpdates(attributeUpdates).offset(tableSegmentOffset).build();
+        return segment.append(append, timer.getRemaining())
+                .thenApply(segmentOffset -> batchOffsets.stream().map(offset -> offset + segmentOffset).collect(Collectors.toList()));
     }
 
     @Override
@@ -143,14 +143,13 @@ class FixedKeyTableSegmentLayout extends TableSegmentLayout {
 
             val attributeId = AttributeId.from(key.getKey().getCopy());
             val au = key.hasVersion()
-                    ? new AttributeUpdate(attributeId, AttributeUpdateType.ReplaceIfEquals, Attributes.NULL_ATTRIBUTE_VALUE, key.getVersion())
+                    ? new AttributeUpdate(attributeId, AttributeUpdateType.ReplaceIfEquals, Attributes.NULL_ATTRIBUTE_VALUE, getCompareVersion(key))
                     : new AttributeUpdate(attributeId, AttributeUpdateType.Replace, Attributes.NULL_ATTRIBUTE_VALUE);
             attributeUpdates.add(au);
         }
-
         val result = tableSegmentOffset == NO_OFFSET
                 ? segment.updateAttributes(attributeUpdates, timer.getRemaining())
-                : segment.append(BufferView.empty(), attributeUpdates, tableSegmentOffset, timer.getRemaining()); // TODO Append2
+                : segment.append(newAppend().data(BufferView.empty()).attributeUpdates(attributeUpdates).offset(tableSegmentOffset).build(), timer.getRemaining()); // TODO Append2
         return Futures.toVoid(result);
     }
 
@@ -205,23 +204,25 @@ class FixedKeyTableSegmentLayout extends TableSegmentLayout {
                                                                               @NonNull GetIteratorItem<T> getItems,
                                                                               @NonNull IteratorArgs args) {
         Preconditions.checkArgument(args.getPrefixFilter() == null, "PrefixFilter not supported.");
-        IteratorStateImpl state;
-        try {
-            state = args.getSerializedState() == null ? null : IteratorStateImpl.deserialize(args.getSerializedState());
-        } catch (IOException ex) {
-            // Bad IteratorState serialization.
-            throw new IllegalDataFormatException("Unable to deserialize `serializedState`.", ex);
-        }
-
-        if (state != null && state.isReachedEnd()) {
-            // Nothing to iterate on.
-            return CompletableFuture.completedFuture(TableIterator.empty());
+        IteratorStateImpl state = null;
+        if (args.getSerializedState() != null) {
+            try {
+                state = IteratorStateImpl.deserialize(args.getSerializedState());
+            } catch (IOException ex) {
+                // Bad IteratorState serialization.
+                throw new IllegalDataFormatException("Unable to deserialize `serializedState`.", ex);
+            }
         }
 
         val segmentKeyLength = getSegmentKeyLength(segment.getInfo());
         val fromId = state == null
                 ? AttributeId.Variable.minValue(segmentKeyLength)
                 : AttributeId.from(state.getLastKey().getCopy()).nextValue();
+        if (fromId == null) {
+            // We've reached the end.
+            return CompletableFuture.completedFuture(TableIterator.empty());
+        }
+
         val toId = AttributeId.Variable.maxValue(segmentKeyLength);
         val timer = new TimeoutTimer(args.getFetchTimeout());
         return segment.attributeIterator(fromId, toId, timer.getRemaining())
@@ -230,7 +231,7 @@ class FixedKeyTableSegmentLayout extends TableSegmentLayout {
                     val stateBuilder = IteratorStateImpl.builder();
                     CompletableFuture<List<T>> result;
                     if (attributePairs.isEmpty()) {
-                        stateBuilder.reachedEnd(true);
+                        stateBuilder.lastKey(AttributeId.Variable.maxValue(segmentKeyLength).toBuffer());
                         result = CompletableFuture.completedFuture(Collections.emptyList());
                     } else {
                         stateBuilder.lastKey(attributePairs.get(attributePairs.size() - 1).getKey().toBuffer());
@@ -265,6 +266,14 @@ class FixedKeyTableSegmentLayout extends TableSegmentLayout {
         return get(segment, keys.stream().map(e -> e.getKey().toBuffer()).collect(Collectors.toList()), timer);
     }
 
+    private long getCompareVersion(TableKey key) {
+        return key.getVersion() == TableKey.NOT_EXISTS ? Attributes.NULL_ATTRIBUTE_VALUE : key.getVersion();
+    }
+
+    private SegmentAppend.SegmentAppendBuilder newAppend() {
+        return SegmentAppend.builder().variableAttributeIds(true);
+    }
+
     //endregion
 
     //region Helper Classes
@@ -285,7 +294,6 @@ class FixedKeyTableSegmentLayout extends TableSegmentLayout {
 
         @NonNull
         private final BufferView lastKey;
-        private final boolean reachedEnd;
 
         @Override
         public String toString() {
@@ -337,13 +345,10 @@ class FixedKeyTableSegmentLayout extends TableSegmentLayout {
 
             private void read00(RevisionDataInput revisionDataInput, IteratorStateImplBuilder builder) throws IOException {
                 builder.lastKey = new ByteArraySegment(revisionDataInput.readArray());
-                builder.reachedEnd = revisionDataInput.readBoolean();
             }
 
             private void write00(IteratorStateImpl state, RevisionDataOutput revisionDataOutput) throws IOException {
-                //revisionDataOutput.length(revisionDataOutput.getCompactIntLength(state.lastKey.getLength()) + state.lastKey.getLength() + 1);
                 revisionDataOutput.writeBuffer(state.lastKey);
-                revisionDataOutput.writeBoolean(state.reachedEnd);
             }
         }
 

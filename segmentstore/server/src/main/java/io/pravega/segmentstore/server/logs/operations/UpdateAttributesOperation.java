@@ -79,12 +79,11 @@ public class UpdateAttributesOperation extends MetadataOperation implements Attr
         private static final int ATTRIBUTE_UUID_UPDATE_LENGTH = RevisionDataOutput.UUID_BYTES + Byte.BYTES + 2 * Long.BYTES;
         /**
          * Fixed portion:
-         * - AttributeId Length: 1 byte
          * - AttributeUpdateType: 1 byte
          * - Value: 8 bytes
          * - We do not encode the compare value anymore. There is no need post-serialization/validation.
          */
-        private static final int ATTRIBUTE_NON_UUID_UPDATE_LENGTH_FIXED = 1 + Byte.BYTES + Long.BYTES;
+        private static final int ATTRIBUTE_NON_UUID_UPDATE_LENGTH_FIXED = Byte.BYTES + Long.BYTES;
 
         @Override
         protected OperationBuilder<UpdateAttributesOperation> newBuilder() {
@@ -110,7 +109,7 @@ public class UpdateAttributesOperation extends MetadataOperation implements Attr
             target.length(STATIC_LENGTH + attributesLength);
             target.writeLong(o.getSequenceNumber());
             target.writeLong(o.streamSegmentId);
-            target.writeCollection(o.attributeUpdates, this::writeAttributeUpdate00);
+            target.writeCollection(updates, this::writeAttributeUpdate00);
         }
 
         private void read00(RevisionDataInput source, OperationBuilder<UpdateAttributesOperation> b) throws IOException {
@@ -143,7 +142,7 @@ public class UpdateAttributesOperation extends MetadataOperation implements Attr
             }
 
             Collection<AttributeUpdate> updates = o.attributeUpdates.stream().filter(au -> !au.getAttributeId().isUUID()).collect(Collectors.toList());
-            int attributesLength = target.getCollectionLength(updates, this::getAttributeUpdateNonUUIDLength);
+            int attributesLength = target.getCollectionLength(updates, au -> getAttributeUpdateNonUUIDLength(target, au));
             target.length(attributesLength);
             target.writeCollection(updates, this::writeAttributeUpdate01);
         }
@@ -166,8 +165,8 @@ public class UpdateAttributesOperation extends MetadataOperation implements Attr
                     Long.MIN_VALUE); // We do not encode this for serialization, so we don't care about it upon deserialization.
         }
 
-        private int getAttributeUpdateNonUUIDLength(AttributeUpdate au) {
-            return au.getAttributeId().byteCount() + ATTRIBUTE_NON_UUID_UPDATE_LENGTH_FIXED;
+        private int getAttributeUpdateNonUUIDLength(RevisionDataOutput target, AttributeUpdate au) {
+            return target.getCompactIntLength(au.getAttributeId().byteCount()) + au.getAttributeId().byteCount() + ATTRIBUTE_NON_UUID_UPDATE_LENGTH_FIXED;
         }
     }
 }

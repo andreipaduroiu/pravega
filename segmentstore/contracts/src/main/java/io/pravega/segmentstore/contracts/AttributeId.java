@@ -10,10 +10,12 @@
 package io.pravega.segmentstore.contracts;
 
 import com.google.common.annotations.VisibleForTesting;
+import io.pravega.common.util.AbstractBufferView;
 import io.pravega.common.util.ArrayView;
 import io.pravega.common.util.BitConverter;
 import io.pravega.common.util.BufferViewComparator;
 import io.pravega.common.util.ByteArraySegment;
+import java.util.Arrays;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NonNull;
@@ -219,11 +221,11 @@ public abstract class AttributeId implements Comparable<AttributeId> {
     public static final class Variable extends AttributeId {
         private static final BufferViewComparator COMPARATOR = BufferViewComparator.create();
         @NonNull
-        private final byte[] data; // TODO: ArrayView or BufferView? Or leave it as-is?
+        private final byte[] data;
 
         @Override
         public boolean isUUID() {
-            return this.data.length == UUID_KEY_LENGTH;
+            return  false; // TODO any interoperability here?
         }
 
         @Override
@@ -255,7 +257,7 @@ public abstract class AttributeId implements Comparable<AttributeId> {
         @Override
         public boolean equals(Object obj) {
             if (obj instanceof Variable) {
-                return this.data.equals(((Variable) obj).data);
+                return Arrays.equals(this.data, ((Variable) obj).data);
             }
 
             return false;
@@ -263,7 +265,7 @@ public abstract class AttributeId implements Comparable<AttributeId> {
 
         @Override
         public int hashCode() {
-            return this.data.hashCode();
+            return AbstractBufferView.hashCode(this.data);
         }
 
         @Override
@@ -274,7 +276,7 @@ public abstract class AttributeId implements Comparable<AttributeId> {
 
         @Override
         public String toString() {
-            return this.data.toString();
+            return String.format("Length = %s", this.data.length);
         }
 
         public static AttributeId minValue(int length) {

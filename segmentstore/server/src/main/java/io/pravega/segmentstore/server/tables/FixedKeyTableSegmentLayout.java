@@ -149,7 +149,7 @@ class FixedKeyTableSegmentLayout extends TableSegmentLayout {
         }
         val result = tableSegmentOffset == NO_OFFSET
                 ? segment.updateAttributes(attributeUpdates, timer.getRemaining())
-                : segment.append(newAppend().data(BufferView.empty()).attributeUpdates(attributeUpdates).offset(tableSegmentOffset).build(), timer.getRemaining()); // TODO Append2
+                : segment.append(newAppend().data(BufferView.empty()).attributeUpdates(attributeUpdates).offset(tableSegmentOffset).build(), timer.getRemaining());
         return Futures.toVoid(result);
     }
 

@@ -144,6 +144,7 @@ public abstract class BufferViewComparator implements Comparator<byte[]>, Serial
      * Gets the minimum value for an array with given length. When compared against this, all other byte arrays with lengths
      * equal to or greater than {@code length} will be larger.
      *
+     * @param length The length.
      * @return The minimum value.
      */
     public static byte[] getMinValue(int length) {
@@ -156,6 +157,7 @@ public abstract class BufferViewComparator implements Comparator<byte[]>, Serial
      * Gets the maximum value for an array with given length. When compared against this, all other byte arrays with lengths
      * equal to or smaller than {@code length} will be smaller.
      *
+     * @param length The length.
      * @return The maximum value.
      */
     public static byte[] getMaxValue(int length) {

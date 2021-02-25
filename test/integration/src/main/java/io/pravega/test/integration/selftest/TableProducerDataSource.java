@@ -222,12 +222,12 @@ class TableProducerDataSource extends ProducerDataSource<TableUpdate> {
 
         TableUpdate generateRemoval() {
             KeyWithVersion toUpdate = pickKey();
-            return TableUpdate.removal(toUpdate.keyId, toUpdate.version);
+            return TableUpdate.removal(toUpdate.keyId, config.getTableKeyLength(), toUpdate.version);
         }
 
         TableUpdate generateUpdate() {
             KeyWithVersion toUpdate = pickKey();
-            return TableUpdate.update(toUpdate.keyId, config.getMaxAppendSize(), toUpdate.version);
+            return TableUpdate.update(toUpdate.keyId, config.getTableKeyLength(), config.getMaxAppendSize(), toUpdate.version);
         }
 
         synchronized private KeyWithVersion pickKey() {

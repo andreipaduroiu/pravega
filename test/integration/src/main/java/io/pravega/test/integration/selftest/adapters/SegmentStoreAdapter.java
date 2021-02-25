@@ -30,6 +30,7 @@ import io.pravega.segmentstore.contracts.StreamSegmentStore;
 import io.pravega.segmentstore.contracts.tables.IteratorArgs;
 import io.pravega.segmentstore.contracts.tables.TableEntry;
 import io.pravega.segmentstore.contracts.tables.TableKey;
+import io.pravega.segmentstore.contracts.tables.TableSegmentConfig;
 import io.pravega.segmentstore.contracts.tables.TableStore;
 import io.pravega.segmentstore.server.store.ServiceBuilder;
 import io.pravega.segmentstore.server.store.ServiceBuilderConfig;
@@ -263,7 +264,21 @@ class SegmentStoreAdapter extends StoreAdapter {
     @Override
     public CompletableFuture<Void> createTable(String tableName, Duration timeout) {
         ensureRunning();
-        return this.tableStore.createSegment(tableName, SegmentType.TABLE_SEGMENT_HASH, timeout);
+        val type = SegmentType.builder();
+        val config = TableSegmentConfig.builder();
+        if (this.config.getTableType() == TestConfig.TableType.Sorted) {
+            type.sortedTableSegment();
+        } else if (this.config.getTableType() == TestConfig.TableType.FixedKey) {
+            Preconditions.checkArgument(this.config.getTableKeyLength() <= 256,
+                    "TableKeyLength (%s) must be a non-negative number smaller than or equal to 256.",
+                    this.config.getMinAppendSize());
+            type.fixedKeyTableSegment();
+            config.keyLength(this.config.getTableKeyLength());
+        } else {
+            type.tableSegment();
+        }
+
+        return this.tableStore.createSegment(tableName, type.build(), config.build(), timeout);
     }
 
     @Override

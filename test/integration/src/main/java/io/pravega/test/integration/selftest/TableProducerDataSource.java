@@ -232,9 +232,12 @@ class TableProducerDataSource extends ProducerDataSource<TableUpdate> {
 
         synchronized private KeyWithVersion pickKey() {
             // Choose whether to pick existing key or not (using configuration).
-            return decide(config.getTableNewKeyPercentage()) || this.recentKeys.isEmpty()
-                    ? new KeyWithVersion(UUID.randomUUID(), config.isTableConditionalUpdates() ? TableKey.NOT_EXISTS : null)
-                    : this.recentKeys.removeFirst();
+            if (decide(config.getTableNewKeyPercentage()) || this.recentKeys.isEmpty()) {
+                return new KeyWithVersion(UUID.randomUUID(), config.isTableConditionalUpdates() ? TableKey.NOT_EXISTS : null);
+            } else {
+                val first = this.recentKeys.removeFirst();
+                return new KeyWithVersion(first.keyId, config.isTableConditionalUpdates() ? first.version : null);
+            }
         }
     }
 

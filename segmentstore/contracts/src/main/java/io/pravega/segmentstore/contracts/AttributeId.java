@@ -18,7 +18,6 @@ import io.pravega.common.util.ByteArraySegment;
 import java.util.Arrays;
 import lombok.AccessLevel;
 import lombok.Getter;
-import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -216,16 +215,19 @@ public abstract class AttributeId implements Comparable<AttributeId> {
     /**
      * A 16-byte {@link AttributeId} that maps to a {@link UUID}.
      */
-    @Getter
-    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
     public static final class Variable extends AttributeId {
         private static final BufferViewComparator COMPARATOR = BufferViewComparator.create();
-        @NonNull
         private final byte[] data;
+        private final int hashCode;
+
+        private Variable(byte[] data) {
+            this.data = data;
+            this.hashCode = AbstractBufferView.hashCode(this.data);
+        }
 
         @Override
         public boolean isUUID() {
-            return  false; // TODO any interoperability here?
+            return false; // TODO any interoperability here?
         }
 
         @Override
@@ -265,7 +267,7 @@ public abstract class AttributeId implements Comparable<AttributeId> {
 
         @Override
         public int hashCode() {
-            return AbstractBufferView.hashCode(this.data);
+            return this.hashCode;
         }
 
         @Override

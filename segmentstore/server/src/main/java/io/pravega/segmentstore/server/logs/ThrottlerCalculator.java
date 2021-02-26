@@ -65,6 +65,16 @@ class ThrottlerCalculator {
      */
     @VisibleForTesting
     static final double DURABLE_DATALOG_THROTTLE_THRESHOLD_FRACTION = 0.1;
+    /**
+     * Maximum size (in number of operations) of the DurableLog, above which maximum throttling will be applied.
+     */
+    @VisibleForTesting
+    static final int DURABLE_LOG_MAX_SIZE = 1_000_000;
+    /**
+     * Desired size (in number of operations) of the DurableLog, above which a gradual throttling will begin.
+     */
+    @VisibleForTesting
+    static final int DURABLE_LOG_TARGET_SIZE = (int) (DURABLE_LOG_MAX_SIZE * 0.95);
     @Singular
     private final List<Throttler> throttlers;
 
@@ -287,6 +297,37 @@ class ThrottlerCalculator {
         }
     }
 
+    private static class DurableLogThrottler extends Throttler {
+        @NonNull
+        private final Supplier<Integer> getDurableLogSize;
+        private final int baseDelay;
+
+        DurableLogThrottler(@NonNull Supplier<Integer> getDurableLogSize) {
+            this.getDurableLogSize = getDurableLogSize;
+            this.baseDelay = calculateBaseDelay(DURABLE_LOG_MAX_SIZE, this::getDelayMultiplier);
+        }
+
+        @Override
+        boolean isThrottlingRequired() {
+            return this.getDurableLogSize.get() > DURABLE_LOG_TARGET_SIZE;
+        }
+
+        @Override
+        int getDelayMillis() {
+            // We only throttle if we exceed the target log size. We increase the throttling amount in a linear fashion.
+            return (int) (getDelayMultiplier(this.getDurableLogSize.get()) * this.baseDelay);
+        }
+
+        @Override
+        ThrottlerName getName() {
+            return ThrottlerName.DurableLog;
+        }
+
+        private double getDelayMultiplier(int size) {
+            return 100 * (size - DURABLE_LOG_TARGET_SIZE);
+        }
+    }
+
     //endregion
 
     //region Builder
@@ -321,6 +362,10 @@ class ThrottlerCalculator {
 
         ThrottlerCalculatorBuilder durableDataLogThrottler(WriteSettings writeSettings, Supplier<QueueStats> getQueueStats) {
             return throttler(new DurableDataLogThrottler(writeSettings, getQueueStats));
+        }
+
+        ThrottlerCalculatorBuilder durableLogThrottler(Supplier<Integer> getDurableLogSize) {
+            return throttler(new DurableLogThrottler(getDurableLogSize));
         }
     }
 
@@ -371,19 +416,28 @@ class ThrottlerCalculator {
     /**
      * Defines Throttler Names.
      */
+    @Getter
+    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
     enum ThrottlerName {
         /**
          * Throttling is required in order to aggregate multiple operations together in a single write.
          */
-        Batching,
+        Batching(false),
         /**
          * Throttling is required due to excessive Cache utilization.
          */
-        Cache,
+        Cache(true),
         /**
          * Throttling is required due to excessive size of DurableDataLog's in-flight queue.
          */
-        DurableDataLog,
+        DurableDataLog(true),
+        /**
+         * Throttling is required due to excessive accumulated Operations in DurableLog (not yet truncated).
+         */
+        DurableLog(true);
+
+        @Getter
+        private final boolean interruptible;
     }
 
     //endregion

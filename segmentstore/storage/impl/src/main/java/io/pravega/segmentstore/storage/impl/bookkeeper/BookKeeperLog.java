@@ -29,14 +29,13 @@ import io.pravega.segmentstore.storage.DurableDataLogException;
 import io.pravega.segmentstore.storage.LogAddress;
 import io.pravega.segmentstore.storage.QueueStats;
 import io.pravega.segmentstore.storage.ThrottleSourceListener;
+import io.pravega.segmentstore.storage.ThrottlerSourceListenerCollection;
 import io.pravega.segmentstore.storage.WriteFailureException;
 import io.pravega.segmentstore.storage.WriteSettings;
 import io.pravega.segmentstore.storage.WriteTooLongException;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
@@ -106,8 +105,7 @@ class BookKeeperLog implements DurableDataLog {
     private final SequentialAsyncProcessor rolloverProcessor;
     private final BookKeeperMetrics.BookKeeperLog metrics;
     private final ScheduledFuture<?> metricReporter;
-    @GuardedBy("queueStateChangeListeners")
-    private final HashSet<ThrottleSourceListener> queueStateChangeListeners;
+    private final ThrottlerSourceListenerCollection queueStateChangeListeners;
     //endregion
 
     //region Constructor
@@ -137,7 +135,7 @@ class BookKeeperLog implements DurableDataLog {
         this.rolloverProcessor = new SequentialAsyncProcessor(this::rollover, retry, this::handleRolloverFailure, this.executorService);
         this.metrics = new BookKeeperMetrics.BookKeeperLog(containerId);
         this.metricReporter = this.executorService.scheduleWithFixedDelay(this::reportMetrics, REPORT_INTERVAL, REPORT_INTERVAL, TimeUnit.MILLISECONDS);
-        this.queueStateChangeListeners = new HashSet<>();
+        this.queueStateChangeListeners = new ThrottlerSourceListenerCollection();
     }
 
     private Retry.RetryAndThrowBase<? extends Exception> createRetryPolicy(int maxWriteAttempts, int writeTimeout) {
@@ -360,14 +358,7 @@ class BookKeeperLog implements DurableDataLog {
 
     @Override
     public void registerQueueStateChangeListener(ThrottleSourceListener listener) {
-        if (listener.isClosed()) {
-            log.warn("{} Attempted to register a closed ThrottleSourceListener ({}).", this.traceObjectId, listener);
-            return;
-        }
-
-        synchronized (this.queueStateChangeListeners) {
-            this.queueStateChangeListeners.add(listener); // This is a Set, so we won't be adding the same listener twice.
-        }
+        this.queueStateChangeListeners.register(listener);
     }
 
     //endregion
@@ -740,31 +731,7 @@ class BookKeeperLog implements DurableDataLog {
     }
 
     private void notifyQueueChangeListeners() {
-        ArrayList<ThrottleSourceListener> toNotify = new ArrayList<>();
-        ArrayList<ThrottleSourceListener> toRemove = new ArrayList<>();
-        synchronized (this.queueStateChangeListeners) {
-            for (ThrottleSourceListener l : this.queueStateChangeListeners) {
-                if (l.isClosed()) {
-                    toRemove.add(l);
-                } else {
-                    toNotify.add(l);
-                }
-            }
-
-            this.queueStateChangeListeners.removeAll(toRemove);
-        }
-
-        for (ThrottleSourceListener l : toNotify) {
-            try {
-                l.notifyThrottleSourceChanged();
-            } catch (Throwable ex) {
-                if (Exceptions.mustRethrow(ex)) {
-                    throw ex;
-                }
-
-                log.error("{}: Error while notifying queue listener {}.", this.traceObjectId, l, ex);
-            }
-        }
+        this.queueStateChangeListeners.notifySourceChanged();
     }
 
     //endregion

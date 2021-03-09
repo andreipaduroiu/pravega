@@ -180,6 +180,11 @@ public abstract class AbstractBufferView implements BufferView {
         }
 
         @Override
+        public int getAllocatedLength() {
+            return 0;
+        }
+
+        @Override
         public InputStream getReader(int offset, int length) {
             return slice(offset, length).getReader();
         }

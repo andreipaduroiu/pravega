@@ -414,9 +414,9 @@ public class AppendProcessorTest extends ThreadPooledTestSuite {
                 .statsRecorder(mockedRecorder)
                 .build();
         // Setup mock to enusure both the SetupAppends return the newer values.
-        when(store.getAttributes(streamSegmentName, Collections.singleton(clientId), true, AppendProcessor.TIMEOUT))
-                .thenReturn(CompletableFuture.completedFuture(Collections.singletonMap(clientId, 0L)))
-                .thenReturn(CompletableFuture.completedFuture(Collections.singletonMap(clientId, 1L)));
+        when(store.getAttributes(streamSegmentName, Collections.singleton(AttributeId.fromUUID(clientId)), true, AppendProcessor.TIMEOUT))
+                .thenReturn(CompletableFuture.completedFuture(Collections.singletonMap(AttributeId.fromUUID(clientId), 0L)))
+                .thenReturn(CompletableFuture.completedFuture(Collections.singletonMap(AttributeId.fromUUID(clientId), 1L)));
 
         val ac1 = interceptAppend(store, streamSegmentName, 0, updateEventNumber(clientId, 1), CompletableFuture.completedFuture((long) data.length));
         // First conditional Append.
@@ -429,7 +429,7 @@ public class AppendProcessorTest extends ThreadPooledTestSuite {
         processor.setupAppend(new SetupAppend(2, clientId, streamSegmentName, ""));
         processor.append(new Append(streamSegmentName, clientId, 2, 1, Unpooled.wrappedBuffer(data), (long) data.length, 2));
 
-        verify(store, times(2)).getAttributes(anyString(), eq(Collections.singleton(clientId)), eq(true), eq(AppendProcessor.TIMEOUT));
+        verify(store, times(2)).getAttributes(anyString(), eq(Collections.singleton(AttributeId.fromUUID(clientId))), eq(true), eq(AppendProcessor.TIMEOUT));
         verifyStoreAppend(ac1, data);
         verifyStoreAppend(ac2, data);
         verify(connection).send(new AppendSetup(1, streamSegmentName, clientId, 0));

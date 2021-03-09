@@ -589,11 +589,12 @@ public class PravegaRequestProcessorTest {
 
     @Test(timeout = 20000)
     public void testCreateTableSegment() throws Exception {
-        testCreateTableSegment(false);
-        testCreateTableSegment(true);
+        testCreateTableSegment(false, 0);
+        testCreateTableSegment(false, 128);
+        testCreateTableSegment(true, 0);
     }
 
-    private void testCreateTableSegment(boolean sorted) throws Exception {
+    private void testCreateTableSegment(boolean sorted, int keyLength) throws Exception {
         // Set up PravegaRequestProcessor instance to execute requests against
         String tableSegmentName = "testCreateTableSegment";
         @Cleanup
@@ -608,9 +609,9 @@ public class PravegaRequestProcessorTest {
                 recorderMock, new PassingTokenVerifier(), false);
 
         // Execute and Verify createTableSegment calling stack is executed as design.
-        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, sorted, ""));
+        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, sorted, keyLength, ""));
         order.verify(connection).send(new WireCommands.SegmentCreated(1, tableSegmentName));
-        processor.createTableSegment(new WireCommands.CreateTableSegment(2, tableSegmentName, sorted, ""));
+        processor.createTableSegment(new WireCommands.CreateTableSegment(2, tableSegmentName, sorted, keyLength, ""));
         order.verify(connection).send(new WireCommands.SegmentAlreadyExists(2, tableSegmentName, ""));
         verify(recorderMock).createTableSegment(eq(tableSegmentName), any());
         verifyNoMoreInteractions(recorderMock);
@@ -621,6 +622,8 @@ public class PravegaRequestProcessorTest {
         Assert.assertFalse(segmentType.isInternal() || segmentType.isCritical() || segmentType.isSystem());
         Assert.assertTrue(segmentType.isTableSegment());
         Assert.assertEquals(sorted, segmentType.isSortedTableSegment());
+        val kl = si.getAttributes().getOrDefault(Attributes.ATTRIBUTE_ID_LENGTH, 0L);
+        Assert.assertEquals(keyLength, (long) kl);
     }
 
     /**
@@ -667,7 +670,7 @@ public class PravegaRequestProcessorTest {
         ArrayList<ArrayView> keys = generateKeys(3, rnd);
 
         // Execute and Verify createSegment calling stack is executed as design.
-        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, false, ""));
+        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, false, 0,""));
         order.verify(connection).send(new WireCommands.SegmentCreated(1, tableSegmentName));
         verify(recorderMock).createTableSegment(eq(tableSegmentName), any());
 
@@ -741,7 +744,7 @@ public class PravegaRequestProcessorTest {
         ArrayList<ArrayView> keys = generateKeys(3, rnd);
 
         // Create a table segment and add data.
-        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, false, ""));
+        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, false, 0, ""));
         order.verify(connection).send(new WireCommands.SegmentCreated(1, tableSegmentName));
         TableEntry e1 = TableEntry.unversioned(keys.get(0), generateValue(rnd));
         processor.updateTableEntries(new WireCommands.UpdateTableEntries(2, tableSegmentName, "", getTableEntries(singletonList(e1)), WireCommands.NULL_TABLE_SEGMENT_OFFSET));
@@ -795,7 +798,7 @@ public class PravegaRequestProcessorTest {
                 recorderMock, new PassingTokenVerifier(), false);
 
         // Create a table segment.
-        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, false, ""));
+        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, false, 0, ""));
         order.verify(connection).send(new WireCommands.SegmentCreated(1, tableSegmentName));
         verify(recorderMock).createTableSegment(eq(tableSegmentName), any());
 
@@ -824,7 +827,7 @@ public class PravegaRequestProcessorTest {
         ArrayList<ArrayView> keys = generateKeys(2, rnd);
 
         // Create a table segment and add data.
-        processor.createTableSegment(new WireCommands.CreateTableSegment(3, tableSegmentName, false, ""));
+        processor.createTableSegment(new WireCommands.CreateTableSegment(3, tableSegmentName, false, 0, ""));
         order.verify(connection).send(new WireCommands.SegmentCreated(3, tableSegmentName));
         verify(recorderMock).createTableSegment(eq(tableSegmentName), any());
 
@@ -860,7 +863,7 @@ public class PravegaRequestProcessorTest {
         ArrayList<ArrayView> keys = generateKeys(2, rnd);
 
         // Create a table segment and add data.
-        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, false, ""));
+        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, false, 0, ""));
         order.verify(connection).send(new WireCommands.SegmentCreated(1, tableSegmentName));
         recorderMockOrder.verify(recorderMock).createTableSegment(eq(tableSegmentName), any());
         TableEntry entry = TableEntry.unversioned(keys.get(0), generateValue(rnd));
@@ -914,7 +917,7 @@ public class PravegaRequestProcessorTest {
         TableEntry e3 = TableEntry.unversioned(keys.get(2), generateValue(rnd));
 
         // Create a table segment and add data.
-        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, false, ""));
+        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, false, 0, ""));
         order.verify(connection).send(new WireCommands.SegmentCreated(1, tableSegmentName));
         verify(recorderMock).createTableSegment(eq(tableSegmentName), any());
         processor.updateTableEntries(new WireCommands.UpdateTableEntries(2, tableSegmentName, "", getTableEntries(asList(e1, e2, e3)), WireCommands.NULL_TABLE_SEGMENT_OFFSET));
@@ -985,7 +988,7 @@ public class PravegaRequestProcessorTest {
         TableEntry e3 = TableEntry.unversioned(keys.get(2), testValue);
 
         // Create a table segment and add data.
-        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, false, ""));
+        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, false, 0, ""));
         order.verify(connection).send(new WireCommands.SegmentCreated(1, tableSegmentName));
         verify(recorderMock).createTableSegment(eq(tableSegmentName), any());
         processor.updateTableEntries(new WireCommands.UpdateTableEntries(2, tableSegmentName, "", getTableEntries(asList(e1, e2, e3)), WireCommands.NULL_TABLE_SEGMENT_OFFSET));
@@ -1057,7 +1060,7 @@ public class PravegaRequestProcessorTest {
         PravegaRequestProcessor processor = new PravegaRequestProcessor(store, tableStore, connection, SegmentStatsRecorder.noOp(),
                 recorderMock, new PassingTokenVerifier(), false);
 
-        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, false, ""));
+        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, false, 0, ""));
         order.verify(connection).send(new WireCommands.SegmentCreated(1, tableSegmentName));
         verify(recorderMock).createTableSegment(eq(tableSegmentName), any());
 
@@ -1084,7 +1087,7 @@ public class PravegaRequestProcessorTest {
         PravegaRequestProcessor processor = new PravegaRequestProcessor(store, tableStore, connection, SegmentStatsRecorder.noOp(),
                 recorderMock, new PassingTokenVerifier(), false);
 
-        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, false, ""));
+        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, false, 0, ""));
         order.verify(connection).send(new WireCommands.SegmentCreated(1, tableSegmentName));
         verify(recorderMock).createTableSegment(eq(tableSegmentName), any());
 
@@ -1132,7 +1135,7 @@ public class PravegaRequestProcessorTest {
         TableEntry e3 = TableEntry.unversioned(keys.get(2), testValue);
 
         // Create a table segment and add data.
-        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, false, ""));
+        processor.createTableSegment(new WireCommands.CreateTableSegment(1, tableSegmentName, false, 0, ""));
         order.verify(connection).send(new WireCommands.SegmentCreated(1, tableSegmentName));
         verify(recorderMock).createTableSegment(eq(tableSegmentName), any());
         processor.updateTableEntries(new WireCommands.UpdateTableEntries(2, tableSegmentName, "",

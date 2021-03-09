@@ -356,7 +356,7 @@ public class SegmentHelper implements AutoCloseable {
         final long requestId = connection.getFlow().asLong();
 
         // All Controller Metadata Segments are non-sorted.
-        return sendRequest(connection, requestId, new WireCommands.CreateTableSegment(requestId, tableName, sortedTableSegment, delegationToken))
+        return sendRequest(connection, requestId, new WireCommands.CreateTableSegment(requestId, tableName, sortedTableSegment, 0, delegationToken))
                 .thenAccept(rpl -> handleReply(clientRequestId, rpl, connection, tableName, WireCommands.CreateTableSegment.class, type));
     }
 

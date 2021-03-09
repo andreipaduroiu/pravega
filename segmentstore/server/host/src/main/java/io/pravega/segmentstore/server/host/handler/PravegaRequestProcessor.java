@@ -44,6 +44,7 @@ import io.pravega.segmentstore.contracts.tables.IteratorArgs;
 import io.pravega.segmentstore.contracts.tables.KeyNotExistsException;
 import io.pravega.segmentstore.contracts.tables.TableEntry;
 import io.pravega.segmentstore.contracts.tables.TableKey;
+import io.pravega.segmentstore.contracts.tables.TableSegmentConfig;
 import io.pravega.segmentstore.contracts.tables.TableSegmentNotEmptyException;
 import io.pravega.segmentstore.contracts.tables.TableStore;
 import io.pravega.segmentstore.server.IllegalContainerStateException;
@@ -572,8 +573,18 @@ public class PravegaRequestProcessor extends FailingRequestProcessor implements 
 
         log.info(createTableSegment.getRequestId(), "Creating table segment {}.", createTableSegment);
         val timer = new Timer();
-        val type = createTableSegment.isSorted() ? SegmentType.TABLE_SEGMENT_SORTED : SegmentType.TABLE_SEGMENT_HASH;
-        tableStore.createSegment(createTableSegment.getSegment(), type, TIMEOUT)
+
+        val typeBuilder = SegmentType.builder().tableSegment();
+        val configBuilder = TableSegmentConfig.builder();
+        if (createTableSegment.isSorted()) {
+            Preconditions.checkArgument(createTableSegment.getKeyLength() == 0, "Cannot create a Sorted TableSegment with fixed-key-length.");
+            typeBuilder.sortedTableSegment();
+        } else if (createTableSegment.getKeyLength() > 0) {
+            typeBuilder.fixedKeyTableSegment();
+            configBuilder.keyLength(createTableSegment.getKeyLength());
+        }
+
+        tableStore.createSegment(createTableSegment.getSegment(), typeBuilder.build(), configBuilder.build(), TIMEOUT)
                 .thenAccept(v -> {
                     connection.send(new SegmentCreated(createTableSegment.getRequestId(), createTableSegment.getSegment()));
                     this.tableStatsRecorder.createTableSegment(createTableSegment.getSegment(), timer.getElapsed());

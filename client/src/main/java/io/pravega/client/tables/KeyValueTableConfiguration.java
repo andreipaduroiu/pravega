@@ -30,4 +30,9 @@ public class KeyValueTableConfiguration implements Serializable {
      * @return The number of Partitions for a Key-Value Table.
      */
     private final int partitionCount;
+
+    /**
+     * The length of each key.
+     */
+    private final int keyLength;
 }

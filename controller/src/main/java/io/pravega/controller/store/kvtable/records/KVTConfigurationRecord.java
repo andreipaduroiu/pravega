@@ -73,7 +73,10 @@ public class KVTConfigurationRecord {
                 throws IOException {
             configurationRecordBuilder.scope(revisionDataInput.readUTF())
                                       .kvtName(revisionDataInput.readUTF());
-            KeyValueTableConfiguration config = KeyValueTableConfiguration.builder().partitionCount(revisionDataInput.readInt()).build();
+            KeyValueTableConfiguration config = KeyValueTableConfiguration.builder()
+                    .partitionCount(revisionDataInput.readInt())
+                    .keyLength(revisionDataInput.readInt())
+                    .build();
             configurationRecordBuilder.kvtConfiguration(config);
 
         }
@@ -83,6 +86,7 @@ public class KVTConfigurationRecord {
             revisionDataOutput.writeUTF(kvtConfigurationRecord.getScope());
             revisionDataOutput.writeUTF(kvtConfigurationRecord.getKvtName());
             revisionDataOutput.writeInt(kvtConfigurationRecord.getKvtConfiguration().getPartitionCount());
+            revisionDataOutput.writeInt(kvtConfigurationRecord.getKvtConfiguration().getKeyLength());
         }
 
 

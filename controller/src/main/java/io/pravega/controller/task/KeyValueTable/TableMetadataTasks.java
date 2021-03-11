@@ -132,7 +132,7 @@ public class TableMetadataTasks implements AutoCloseable {
                                        if (state.equals(KVTableState.UNKNOWN) || state.equals(KVTableState.CREATING)) {
                                            //3. get a new UUID for the KVTable we will be creating.
                                            byte[] newUUID = kvtMetadataStore.newScope(scope).newId();
-                                           CreateTableEvent event = new CreateTableEvent(scope, kvtName, kvtConfig.getPartitionCount(),
+                                           CreateTableEvent event = new CreateTableEvent(scope, kvtName, kvtConfig.getPartitionCount(), kvtConfig.getKeyLength(),
                                                         createTimestamp, requestId, BitConverter.readUUID(newUUID, 0));
                                            //4. Update ScopeTable with the entry for this KVT and Publish the event for creation
                                            return eventHelper.addIndexAndSubmitTask(event,
@@ -239,7 +239,7 @@ public class TableMetadataTasks implements AutoCloseable {
         if (creationTime == requestCreateTimestamp) {
             return kvtMetadataStore.getConfiguration(requestScopeName, requestKVTName, null, executor)
                     .thenCompose(cfg -> {
-                        if (cfg.getPartitionCount() == requestKVTConfig.getPartitionCount()) {
+                        if (cfg.getPartitionCount() == requestKVTConfig.getPartitionCount() && cfg.getKeyLength() == requestKVTConfig.getKeyLength()) {
                             return CompletableFuture.completedFuture(Boolean.TRUE);
                         } else {
                             return CompletableFuture.completedFuture(Boolean.FALSE);
@@ -255,19 +255,19 @@ public class TableMetadataTasks implements AutoCloseable {
     }
 
     public CompletableFuture<Void> createNewSegments(String scope, String kvt,
-                                                      List<Long> segmentIds, long requestId) {
+                                                      List<Long> segmentIds, int keyLength, long requestId) {
         return Futures.toVoid(Futures.allOfWithResults(segmentIds
                 .stream()
                 .parallel()
-                .map(segment -> createNewSegment(scope, kvt, segment, retrieveDelegationToken(), requestId))
+                .map(segment -> createNewSegment(scope, kvt, segment, keyLength, retrieveDelegationToken(), requestId))
                 .collect(Collectors.toList())));
     }
 
-    private CompletableFuture<Void> createNewSegment(String scope, String kvt, long segmentId, String controllerToken,
+    private CompletableFuture<Void> createNewSegment(String scope, String kvt, long segmentId, int keyLength, String controllerToken,
                                                      long requestId) {
         final String qualifiedTableSegmentName = getQualifiedTableSegmentName(scope, kvt, segmentId);
         log.debug("Creating segment {}", qualifiedTableSegmentName);
-        return Futures.toVoid(withRetries(() -> segmentHelper.createTableSegment(qualifiedTableSegmentName, controllerToken, requestId, true), executor));
+        return Futures.toVoid(withRetries(() -> segmentHelper.createTableSegment(qualifiedTableSegmentName, controllerToken, requestId, keyLength == 0, keyLength), executor));
     }
 
     @Override

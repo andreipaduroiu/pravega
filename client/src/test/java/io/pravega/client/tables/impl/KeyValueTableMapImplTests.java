@@ -47,7 +47,7 @@ public class KeyValueTableMapImplTests extends KeyValueTableTestSetup {
     private MockConnectionFactoryImpl connectionFactory;
     private MockTableSegmentFactory segmentFactory;
     private MockController controller;
-    private KeyValueTable<Integer, String> keyValueTable;
+    private KeyValueTable<Long, String> keyValueTable;
 
     //region Setup and Teardown
 
@@ -57,7 +57,7 @@ public class KeyValueTableMapImplTests extends KeyValueTableTestSetup {
     }
 
     @Override
-    protected KeyValueTable<Integer, String> createKeyValueTable() {
+    protected KeyValueTable<Long, String> createKeyValueTable() {
         return this.keyValueTable;
     }
 
@@ -218,7 +218,7 @@ public class KeyValueTableMapImplTests extends KeyValueTableTestSetup {
             if (key % 2 == 0) {
                 // Insert via computeIfAbsent().
                 val ca = map.computeIfAbsent(key, k -> {
-                    Assert.assertEquals(key, (int) k);
+                    Assert.assertEquals(key, (long) k);
                     return value;
                 });
                 Assert.assertEquals(value, ca);
@@ -227,7 +227,7 @@ public class KeyValueTableMapImplTests extends KeyValueTableTestSetup {
             } else {
                 // Insert via compute().
                 val c = map.compute(key, (k, existingValue) -> {
-                    Assert.assertEquals(key, (int) k);
+                    Assert.assertEquals(key, (long) k);
                     Assert.assertNull(existingValue);
                     return value;
                 });
@@ -246,7 +246,7 @@ public class KeyValueTableMapImplTests extends KeyValueTableTestSetup {
             if (key % 2 == 0) {
                 // Remove via computeIfPresent.
                 val cp = map.computeIfPresent(key, (k, existingValue) -> {
-                    Assert.assertEquals(key, (int) k);
+                    Assert.assertEquals(key, (long) k);
                     Assert.assertEquals(value, existingValue);
                     return null;
                 });
@@ -254,7 +254,7 @@ public class KeyValueTableMapImplTests extends KeyValueTableTestSetup {
             } else {
                 // Remove via compute().
                 val c = map.compute(key, (k, existingValue) -> {
-                    Assert.assertEquals(key, (int) k);
+                    Assert.assertEquals(key, (long) k);
                     Assert.assertEquals(value, existingValue);
                     return null;
                 });
@@ -264,13 +264,13 @@ public class KeyValueTableMapImplTests extends KeyValueTableTestSetup {
             val cp2 = map.computeIfPresent(key, (k, existingValue) -> AssertExtensions.fail("computeIfPresent executed when no key present."));
             Assert.assertNull(cp2);
             val ca = map.computeIfAbsent(key, k -> {
-                Assert.assertEquals(key, (int) k);
+                Assert.assertEquals(key, (long) k);
                 return null;
             });
             Assert.assertNull(ca);
 
             val c2 = map.compute(key, (k, existingValue) -> {
-                Assert.assertEquals(key, (int) k);
+                Assert.assertEquals(key, (long) k);
                 Assert.assertNull(existingValue);
                 return null;
             });
@@ -334,7 +334,7 @@ public class KeyValueTableMapImplTests extends KeyValueTableTestSetup {
         val kvt = createKeyValueTable();
         val expectedEntries = new ExpectedValues();
         populate(kvt, expectedEntries, 0);
-        val keysByKeyFamily = new HashMap<String, List<Integer>>();
+        val keysByKeyFamily = new HashMap<String, List<Long>>();
 
         // Contains, ContainsAll, size, isEmpty, iterator, stream, toArray.
         forEveryKeyFamily(false, (keyFamily, keyIds) -> {
@@ -351,10 +351,10 @@ public class KeyValueTableMapImplTests extends KeyValueTableTestSetup {
             val expectedKeys = expected.keySet().stream().sorted().collect(Collectors.toList());
             val iteratorItems = StreamSupport.stream(Spliterators.spliteratorUnknownSize(keySet.iterator(), 0), false).sorted().collect(Collectors.toList());
             val streamItems = keySet.stream().sorted().collect(Collectors.toList());
-            val toArrayItems = Stream.of(keySet.toArray()).mapToInt(o -> (int) o).sorted().boxed().collect(Collectors.toList());
-            AssertExtensions.assertListEquals("iterator", expectedKeys, iteratorItems, Integer::equals);
-            AssertExtensions.assertListEquals("stream", expectedKeys, streamItems, Integer::equals);
-            AssertExtensions.assertListEquals("toArray", expectedKeys, toArrayItems, Integer::equals);
+            val toArrayItems = Stream.of(keySet.toArray()).mapToLong(o -> (long) o).sorted().boxed().collect(Collectors.toList());
+            AssertExtensions.assertListEquals("iterator", expectedKeys, iteratorItems, Long::equals);
+            AssertExtensions.assertListEquals("stream", expectedKeys, streamItems, Long::equals);
+            AssertExtensions.assertListEquals("toArray", expectedKeys, toArrayItems, Long::equals);
             keysByKeyFamily.put(keyFamily, expectedKeys);
         });
 
@@ -419,7 +419,7 @@ public class KeyValueTableMapImplTests extends KeyValueTableTestSetup {
         @Cleanup
         val kvt = createKeyValueTable();
         val expectedEntries = new ExpectedValues();
-        val entriesByKeyFamily = new HashMap<String, List<Map.Entry<Integer, String>>>();
+        val entriesByKeyFamily = new HashMap<String, List<Map.Entry<Long, String>>>();
 
         // Add, AddAll
         forEveryKeyFamily(false, (keyFamily, keyIds) -> {
@@ -456,12 +456,12 @@ public class KeyValueTableMapImplTests extends KeyValueTableTestSetup {
             }
 
             val expectedEntrySet = expected.entrySet().stream()
-                    .sorted(Comparator.comparingInt(Map.Entry::getKey)).collect(Collectors.toList());
+                    .sorted(Comparator.comparingLong(Map.Entry::getKey)).collect(Collectors.toList());
             val iteratorItems = StreamSupport.stream(Spliterators.spliteratorUnknownSize(entrySet.iterator(), 0), false)
-                    .sorted(Comparator.comparingInt(Map.Entry::getKey)).collect(Collectors.toList());
-            val streamItems = entrySet.stream().sorted(Comparator.comparingInt(Map.Entry::getKey)).collect(Collectors.toList());
+                    .sorted(Comparator.comparingLong(Map.Entry::getKey)).collect(Collectors.toList());
+            val streamItems = entrySet.stream().sorted(Comparator.comparingLong(Map.Entry::getKey)).collect(Collectors.toList());
             val toArrayItems = Stream.of(entrySet.toArray()).map(o -> (Map.Entry<Integer, String>) o)
-                    .sorted(Comparator.comparingInt(Map.Entry::getKey)).collect(Collectors.toList());
+                    .sorted(Comparator.comparingLong(Map.Entry::getKey)).collect(Collectors.toList());
             AssertExtensions.assertListEquals("iterator", expectedEntrySet, iteratorItems, Object::equals);
             AssertExtensions.assertListEquals("stream", expectedEntrySet, streamItems, Object::equals);
             AssertExtensions.assertListEquals("toArray", expectedEntrySet, toArrayItems, Object::equals);
@@ -557,7 +557,7 @@ public class KeyValueTableMapImplTests extends KeyValueTableTestSetup {
             map.putDirect(key, value);
             expectedEntries.put(keyFamily, key, value);
         });
-        val entriesByKeyFamily = new HashMap<String, List<Map.Entry<Integer, String>>>();
+        val entriesByKeyFamily = new HashMap<String, List<Map.Entry<Long, String>>>();
 
         // Contains, ContainsAll, size, isEmpty, iterator, stream, toArray.
         forEveryKeyFamily(false, (keyFamily, ignored) -> {
@@ -723,11 +723,11 @@ public class KeyValueTableMapImplTests extends KeyValueTableTestSetup {
         }
     }
 
-    private Map<Integer, String> getExpectedValues(List<Integer> keyIds, int iteration) {
+    private Map<Long, String> getExpectedValues(List<Long> keyIds, int iteration) {
         return keyIds.stream().collect(Collectors.toMap(this::getKey, keyId -> getValue(keyId, iteration)));
     }
 
-    private void populate(KeyValueTable<Integer, String> kvt, ExpectedValues expectedValues, int iteration) {
+    private void populate(KeyValueTable<Long, String> kvt, ExpectedValues expectedValues, int iteration) {
         forEveryKey((keyFamily, keyId) -> {
             val key = getKey(keyId);
             val value = getValue(keyId, iteration);
@@ -737,7 +737,7 @@ public class KeyValueTableMapImplTests extends KeyValueTableTestSetup {
         });
     }
 
-    private void check(KeyValueTable<Integer, String> kvt, ExpectedValues values) {
+    private void check(KeyValueTable<Long, String> kvt, ExpectedValues values) {
         values.getKeyFamilies().forEach(keyFamily -> {
             val expectedMap = values.get(keyFamily);
             val actualMap = kvt.getMapFor(keyFamily);
@@ -750,8 +750,8 @@ public class KeyValueTableMapImplTests extends KeyValueTableTestSetup {
             } else {
                 // Test using entrySet iterator; it's a more complete check it will also return any "extra" entries that
                 // we may not know about.
-                val actualEntries = actualMap.entrySet().stream().sorted(Comparator.comparingInt(Map.Entry::getKey)).collect(Collectors.toList());
-                val expectedEntries = expectedMap.entrySet().stream().sorted(Comparator.comparingInt(Map.Entry::getKey)).collect(Collectors.toList());
+                val actualEntries = actualMap.entrySet().stream().sorted(Comparator.comparingLong(Map.Entry::getKey)).collect(Collectors.toList());
+                val expectedEntries = expectedMap.entrySet().stream().sorted(Comparator.comparingLong(Map.Entry::getKey)).collect(Collectors.toList());
                 AssertExtensions.assertListEquals("", expectedEntries, actualEntries, Objects::equals);
             }
 
@@ -763,21 +763,21 @@ public class KeyValueTableMapImplTests extends KeyValueTableTestSetup {
     }
 
     private static class ExpectedValues {
-        private final HashMap<String, HashMap<Integer, String>> valuesByKeyFamily = new HashMap<>();
+        private final HashMap<String, HashMap<Long, String>> valuesByKeyFamily = new HashMap<>();
 
-        void put(String keyFamily, int keyId, String value) {
+        void put(String keyFamily, long keyId, String value) {
             this.valuesByKeyFamily.computeIfAbsent(keyFamily, kf -> new HashMap<>()).put(keyId, value);
         }
 
-        void putAll(String keyFamily, Map<Integer, String> values) {
+        void putAll(String keyFamily, Map<Long, String> values) {
             this.valuesByKeyFamily.computeIfAbsent(keyFamily, kf -> new HashMap<>()).putAll(values);
         }
 
-        void remove(String keyFamily, int keyId) {
+        void remove(String keyFamily, long keyId) {
             this.valuesByKeyFamily.computeIfAbsent(keyFamily, kf -> new HashMap<>()).remove(keyId);
         }
 
-        void remove(String keyFamily, List<Integer> keyIds) {
+        void remove(String keyFamily, List<Long> keyIds) {
             this.valuesByKeyFamily.computeIfAbsent(keyFamily, kf -> new HashMap<>()).keySet().removeAll(keyIds);
         }
 
@@ -789,7 +789,7 @@ public class KeyValueTableMapImplTests extends KeyValueTableTestSetup {
             this.valuesByKeyFamily.computeIfAbsent(keyFamily, kf -> new HashMap<>()).clear();
         }
 
-        Map<Integer, String> get(String keyFamily) {
+        Map<Long, String> get(String keyFamily) {
             return Collections.unmodifiableMap(this.valuesByKeyFamily.getOrDefault(keyFamily, new HashMap<>()));
         }
 

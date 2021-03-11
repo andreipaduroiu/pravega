@@ -17,7 +17,7 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * A collection of {@link ThrottleSourceListener}/
+ * A collection of {@link ThrottleSourceListener}.
  */
 @Slf4j
 public class ThrottlerSourceListenerCollection {

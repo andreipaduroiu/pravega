@@ -10,6 +10,7 @@
 package io.pravega.segmentstore.server.tables;
 
 import com.google.common.base.Preconditions;
+import io.pravega.common.Exceptions;
 import io.pravega.common.ObjectBuilder;
 import io.pravega.common.TimeoutTimer;
 import io.pravega.common.concurrent.Futures;
@@ -26,11 +27,14 @@ import io.pravega.segmentstore.contracts.AttributeUpdate;
 import io.pravega.segmentstore.contracts.AttributeUpdateByReference;
 import io.pravega.segmentstore.contracts.AttributeUpdateType;
 import io.pravega.segmentstore.contracts.Attributes;
+import io.pravega.segmentstore.contracts.BadAttributeUpdateException;
 import io.pravega.segmentstore.contracts.SegmentProperties;
 import io.pravega.segmentstore.contracts.SegmentType;
+import io.pravega.segmentstore.contracts.tables.BadKeyVersionException;
 import io.pravega.segmentstore.contracts.tables.IteratorArgs;
 import io.pravega.segmentstore.contracts.tables.IteratorItem;
 import io.pravega.segmentstore.contracts.tables.IteratorState;
+import io.pravega.segmentstore.contracts.tables.KeyNotExistsException;
 import io.pravega.segmentstore.contracts.tables.TableEntry;
 import io.pravega.segmentstore.contracts.tables.TableKey;
 import io.pravega.segmentstore.contracts.tables.TableSegmentConfig;
@@ -48,6 +52,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.stream.Collectors;
 import lombok.Builder;
@@ -124,7 +129,7 @@ class FixedKeyTableSegmentLayout extends TableSegmentLayout {
 
         val serializedEntries = this.serializer.serializeUpdate(entries);
         val append = newAppend().data(serializedEntries).attributeUpdates(attributeUpdates).offset(tableSegmentOffset).build();
-        return segment.append(append, timer.getRemaining())
+        return handleConditionalUpdateException(segment.append(append, timer.getRemaining()), segmentInfo)
                 .thenApply(segmentOffset -> batchOffsets.stream().map(offset -> offset + segmentOffset).collect(Collectors.toList()));
     }
 
@@ -150,7 +155,22 @@ class FixedKeyTableSegmentLayout extends TableSegmentLayout {
         val result = tableSegmentOffset == NO_OFFSET
                 ? segment.updateAttributes(attributeUpdates, timer.getRemaining())
                 : segment.append(newAppend().data(BufferView.empty()).attributeUpdates(attributeUpdates).offset(tableSegmentOffset).build(), timer.getRemaining());
-        return Futures.toVoid(result);
+
+        return Futures.toVoid(handleConditionalUpdateException(result, segmentInfo));
+    }
+
+    private <T> CompletableFuture<T> handleConditionalUpdateException(CompletableFuture<T> update, SegmentProperties segmentInfo) {
+        return update.exceptionally(ex -> {
+            ex = Exceptions.unwrap(ex);
+            if (ex instanceof BadAttributeUpdateException) {
+                val bau = (BadAttributeUpdateException) ex;
+                ex = bau.isPreviousValueMissing()
+                        ? new KeyNotExistsException(segmentInfo.getName(), bau.getAttributeId().toBuffer())
+                        : new BadKeyVersionException(segmentInfo.getName(), Collections.emptyMap());
+            }
+
+            throw new CompletionException(ex);
+        });
     }
 
     @Override

@@ -449,9 +449,9 @@ public abstract class KeyValueTableTestBase extends KeyValueTableTestSetup {
         checkIterator(kvt, KeyValueTable::entryIterator, TableEntry::getKey, e -> e, this::areEqual);
     }
 
-    private <ItemT> void checkIterator(KeyValueTable<Integer, String> keyValueTable, InvokeIterator<ItemT> invokeIterator,
-                                       Function<ItemT, TableKey<Integer>> getKeyFromItem,
-                                       Function<TableEntry<Integer, String>, ItemT> getItemFromEntry,
+    private <ItemT> void checkIterator(KeyValueTable<Long, String> keyValueTable, InvokeIterator<ItemT> invokeIterator,
+                                       Function<ItemT, TableKey<Long>> getKeyFromItem,
+                                       Function<TableEntry<Long, String>, ItemT> getItemFromEntry,
                                        BiPredicate<ItemT, ItemT> areEqual) {
         val itemsAtOnce = getKeysPerKeyFamily() / 5;
 
@@ -471,7 +471,7 @@ public abstract class KeyValueTableTestBase extends KeyValueTableTestSetup {
             val keys = keyIds.stream().map(this::getKey).sorted().collect(Collectors.toList());
             val actualKeys = iteratorResults.stream()
                     .flatMap(ii -> ii.getItems().stream())
-                    .sorted(Comparator.comparingInt(e -> getKeyFromItem.apply(e).getKey()))
+                    .sorted(Comparator.comparingLong(e -> getKeyFromItem.apply(e).getKey()))
                     .collect(Collectors.toList());
             Assert.assertEquals("Unexpected item count" + hint, keys.size(), actualKeys.size());
             for (int i = 0; i < keys.size(); i++) {
@@ -517,15 +517,15 @@ public abstract class KeyValueTableTestBase extends KeyValueTableTestSetup {
         return new VersionImpl(newSegmentId, newVersion);
     }
 
-    private boolean areEqualExcludingVersion(TableKey<Integer> k1, TableKey<Integer> k2) {
+    private boolean areEqualExcludingVersion(TableKey<Long> k1, TableKey<Long> k2) {
         return k1.getKey().equals(k2.getKey());
     }
 
-    private boolean areEqual(TableKey<Integer> k1, TableKey<Integer> k2) {
+    private boolean areEqual(TableKey<Long> k1, TableKey<Long> k2) {
         return areEqualExcludingVersion(k1, k2) && k1.getVersion().equals(k2.getVersion());
     }
 
-    private boolean areEqual(TableEntry<Integer, String> e1, TableEntry<Integer, String> e2) {
+    private boolean areEqual(TableEntry<Long, String> e1, TableEntry<Long, String> e2) {
         return areEqual(e1.getKey(), e2.getKey()) && e1.getValue().equals(e2.getValue());
     }
 
@@ -535,7 +535,7 @@ public abstract class KeyValueTableTestBase extends KeyValueTableTestSetup {
 
     @FunctionalInterface
     private interface InvokeIterator<T> {
-        AsyncIterator<IteratorItem<T>> apply(KeyValueTable<Integer, String> kvt, String keyFamily, int itemsAtOnce, IteratorState state);
+        AsyncIterator<IteratorItem<T>> apply(KeyValueTable<Long, String> kvt, String keyFamily, int itemsAtOnce, IteratorState state);
     }
 
     //endregion

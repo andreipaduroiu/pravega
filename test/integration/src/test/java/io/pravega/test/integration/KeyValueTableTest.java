@@ -22,6 +22,7 @@ import io.pravega.client.tables.KeyValueTableClientConfiguration;
 import io.pravega.client.tables.KeyValueTableConfiguration;
 import io.pravega.client.tables.impl.KeyValueTableFactoryImpl;
 import io.pravega.client.tables.impl.KeyValueTableTestBase;
+import io.pravega.client.tables.impl.TableSegment;
 import io.pravega.common.util.AsyncIterator;
 import io.pravega.common.util.ByteArraySegment;
 import io.pravega.segmentstore.contracts.StreamSegmentNotExistsException;
@@ -38,13 +39,13 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
-
-import lombok.val;
 import lombok.extern.slf4j.Slf4j;
+import lombok.val;
 import org.apache.curator.test.TestingServer;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import static io.pravega.test.common.AssertExtensions.assertThrows;
@@ -59,13 +60,13 @@ public class KeyValueTableTest extends KeyValueTableTestBase {
     private static final String SCOPE = "Scope";
     private static final KeyValueTableConfiguration DEFAULT_CONFIG = KeyValueTableConfiguration.builder().partitionCount(5).build();
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
+    protected Controller controller;
     private ServiceBuilder serviceBuilder;
     private TableStore tableStore;
     private PravegaConnectionListener serverListener = null;
     private ConnectionPool connectionPool;
     private TestingServer zkTestServer = null;
     private ControllerWrapper controllerWrapper = null;
-    private Controller controller;
     private KeyValueTableFactory keyValueTableFactory;
     private final int controllerPort = TestUtils.getAvailableListenPort();
     private final String serviceHost = ENDPOINT;
@@ -118,7 +119,7 @@ public class KeyValueTableTest extends KeyValueTableTestBase {
     @Test
     public void testCreateListKeyValueTable() {
         val kvt1 = newKeyValueTableName();
-        boolean created = this.controller.createKeyValueTable(kvt1.getScope(), kvt1.getKeyValueTableName(), DEFAULT_CONFIG).join();
+        boolean created = createKeyValueTableInController(kvt1, DEFAULT_CONFIG);
         Assert.assertTrue(created);
 
         val segments = this.controller.getCurrentSegmentsForKeyValueTable(kvt1.getScope(), kvt1.getKeyValueTableName()).join();
@@ -127,7 +128,7 @@ public class KeyValueTableTest extends KeyValueTableTestBase {
         for (val s : segments.getSegments()) {
             // We know there's nothing in these segments. But if the segments hadn't been created, then this will throw
             // an exception.
-            this.tableStore.get(s.getKVTScopedName(), Collections.singletonList(new ByteArraySegment(new byte[1])), TIMEOUT).join();
+            this.tableStore.get(s.getKVTScopedName(), Collections.singletonList(new ByteArraySegment(new byte[KEY_LENGTH])), TIMEOUT).join();
         }
 
         // Verify re-creation does not work.
@@ -174,7 +175,7 @@ public class KeyValueTableTest extends KeyValueTableTestBase {
     @Test
     public void testCreateDeleteKeyValueTable() {
         val kvt1 = newKeyValueTableName();
-        boolean created = this.controller.createKeyValueTable(kvt1.getScope(), kvt1.getKeyValueTableName(), DEFAULT_CONFIG).join();
+        boolean created = createKeyValueTableInController(kvt1, DEFAULT_CONFIG);
         Assert.assertTrue(created);
         val segments = this.controller.getCurrentSegmentsForKeyValueTable(kvt1.getScope(), kvt1.getKeyValueTableName()).join();
         Assert.assertEquals(DEFAULT_CONFIG.getPartitionCount(), segments.getSegments().size());
@@ -183,7 +184,7 @@ public class KeyValueTableTest extends KeyValueTableTestBase {
             // We know there's nothing in these segments. But if the segments hadn't been created, then this will throw
             // an exception.
             log.info("Segment Number {}", s.getSegmentId());
-            this.tableStore.get(s.getKVTScopedName(), Collections.singletonList(new ByteArraySegment(new byte[1])), TIMEOUT).join();
+            this.tableStore.get(s.getKVTScopedName(), Collections.singletonList(new ByteArraySegment(new byte[KEY_LENGTH])), TIMEOUT).join();
         }
 
         // Delete and verify segments have been deleted too.
@@ -194,28 +195,92 @@ public class KeyValueTableTest extends KeyValueTableTestBase {
         for (val s : segments.getSegments()) {
             AssertExtensions.assertSuppliedFutureThrows(
                     "Segment " + s + " has not been deleted.",
-                    () -> this.tableStore.get(s.getKVTScopedName(), Collections.singletonList(new ByteArraySegment(new byte[1])), TIMEOUT),
+                    () -> this.tableStore.get(s.getKVTScopedName(), Collections.singletonList(new ByteArraySegment(new byte[KEY_LENGTH])), TIMEOUT),
                     ex -> ex instanceof StreamSegmentNotExistsException);
         }
 
     }
 
     @Override
-    protected KeyValueTable<Integer, String> createKeyValueTable() {
+    protected KeyValueTable<Long, String> createKeyValueTable() {
         return createKeyValueTable(KEY_SERIALIZER, VALUE_SERIALIZER);
     }
 
     @Override
     protected <K, V> KeyValueTable<K, V> createKeyValueTable(Serializer<K> keySerializer, Serializer<V> valueSerializer) {
         val kvt = newKeyValueTableName();
-        boolean created = this.controller.createKeyValueTable(kvt.getScope(), kvt.getKeyValueTableName(), DEFAULT_CONFIG).join();
+        boolean created = createKeyValueTableInController(kvt, DEFAULT_CONFIG);
         Assert.assertTrue(created);
+        return createKeyValueTable(this.keyValueTableFactory, kvt, keySerializer, valueSerializer);
+    }
+
+    protected <K, V> KeyValueTable<K, V> createKeyValueTable(KeyValueTableFactory factory, KeyValueTableInfo kvt, Serializer<K> keySerializer, Serializer<V> valueSerializer) {
         return this.keyValueTableFactory.forKeyValueTable(kvt.getKeyValueTableName(), keySerializer, valueSerializer,
                 KeyValueTableClientConfiguration.builder().build());
     }
 
+    protected boolean createKeyValueTableInController(KeyValueTableInfo kvt, KeyValueTableConfiguration config) {
+        return this.controller.createKeyValueTable(kvt.getScope(), kvt.getKeyValueTableName(), config).join();
+    }
+
     private KeyValueTableInfo newKeyValueTableName() {
         return new KeyValueTableInfo(SCOPE, String.format("KVT-%d", System.nanoTime()));
+    }
+
+    public static class FixedKeyLength extends KeyValueTableTest {
+        private static final int KEY_LENGTH = Long.BYTES;
+
+        @Override
+        protected boolean createKeyValueTableInController(KeyValueTableInfo kvt, KeyValueTableConfiguration baseConfig) {
+            return this.controller.createKeyValueTable(kvt.getScope(), kvt.getKeyValueTableName(),
+                    KeyValueTableConfiguration.builder().partitionCount(baseConfig.getPartitionCount()).keyLength(KEY_LENGTH).build()).join();
+        }
+
+        @Override
+        protected <K, V> KeyValueTable<K, V> createKeyValueTable(KeyValueTableFactory factory, KeyValueTableInfo kvt, Serializer<K> keySerializer, Serializer<V> valueSerializer) {
+            return factory.forKeyValueTableFixedKeyLength(kvt.getKeyValueTableName(), keySerializer, valueSerializer,
+                    KeyValueTableClientConfiguration.builder().build());
+        }
+
+        @Override
+        protected int getKeyFamilyCount() {
+            return 0; // Not supported in this prototype.
+        }
+
+        @Override
+        protected int getKeysWithoutKeyFamily() {
+            return Math.min(TableSegment.MAXIMUM_BATCH_KEY_COUNT, getKeysPerKeyFamily());
+        }
+
+        @Test
+        @Ignore
+        public void testLargeBatchUpdates() {
+            super.testLargeBatchUpdates();
+        }
+
+        @Test
+        @Ignore
+        public void testLargeEntryBatchRetrieval() {
+            super.testLargeEntryBatchRetrieval();
+        }
+
+        @Test
+        @Ignore
+        public void testLargeKeyValueUpdates() {
+            super.testLargeKeyValueUpdates();
+        }
+
+        @Test
+        @Ignore
+        public void testMultiKeyOperations() {
+            super.testMultiKeyOperations();
+        }
+
+        @Test
+        @Ignore
+        public void testIterators() {
+            super.testIterators();
+        }
     }
 
 }

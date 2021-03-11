@@ -56,11 +56,14 @@ public class CreateTableTask implements TableTask<CreateTableEvent> {
         String scope = request.getScopeName();
         String kvt = request.getKvtName();
         int partitionCount = request.getPartitionCount();
+        int keyLength = request.getKeyLength();
         long creationTime = request.getTimestamp();
         long requestId = request.getRequestId();
         String kvTableId = request.getTableId().toString();
         KeyValueTableConfiguration config = KeyValueTableConfiguration.builder()
-                                            .partitionCount(partitionCount).build();
+                                            .partitionCount(partitionCount)
+                                            .keyLength(keyLength)
+                                            .build();
 
         return RetryHelper.withRetriesAsync(() -> getKeyValueTable(scope, kvt)
                 .thenCompose(table -> table.getId()).thenCompose(id -> {
@@ -80,7 +83,7 @@ public class CreateTableTask implements TableTask<CreateTableEvent> {
                                         .boxed()
                                         .map(x -> NameUtils.computeSegmentId(x, 0))
                                         .collect(Collectors.toList());
-                                kvtMetadataTasks.createNewSegments(scope, kvt, newSegments, requestId)
+                                kvtMetadataTasks.createNewSegments(scope, kvt, newSegments, keyLength, requestId)
                                         .thenCompose(y -> {
                                             final KVTOperationContext context = kvtMetadataStore.createContext(scope, kvt);
                                             kvtMetadataStore.getVersionedState(scope, kvt, context, executor)

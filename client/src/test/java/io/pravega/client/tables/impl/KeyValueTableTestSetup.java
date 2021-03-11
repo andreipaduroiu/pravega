@@ -33,11 +33,12 @@ import org.junit.Before;
  */
 abstract class KeyValueTableTestSetup extends LeakDetectorTestSuite {
     protected static final String NULL_KEY_FAMILY = "[NULL]"; // Used for HashMap keys.
-    protected static final Serializer<Integer> KEY_SERIALIZER = new IntegerSerializer();
+    protected static final Serializer<Long> KEY_SERIALIZER = new LongSerializer();
     protected static final Serializer<String> VALUE_SERIALIZER = new UTF8StringSerializer();
     protected static final int DEFAULT_SEGMENT_COUNT = 4;
     protected static final int DEFAULT_KEY_FAMILY_COUNT = 100;
     protected static final int DEFAULT_KEYS_PER_KEY_FAMILY = 10;
+    protected static final int KEY_LENGTH = Long.BYTES;
     @Getter(AccessLevel.PROTECTED)
     private List<String> keyFamilies;
 
@@ -58,7 +59,7 @@ abstract class KeyValueTableTestSetup extends LeakDetectorTestSuite {
         return 3;
     }
 
-    protected abstract KeyValueTable<Integer, String> createKeyValueTable();
+    protected abstract KeyValueTable<Long, String> createKeyValueTable();
 
     protected abstract <K, V> KeyValueTable<K, V> createKeyValueTable(Serializer<K> keySerializer, Serializer<V> valueSerializer);
 
@@ -74,7 +75,7 @@ abstract class KeyValueTableTestSetup extends LeakDetectorTestSuite {
         return DEFAULT_KEYS_PER_KEY_FAMILY;
     }
 
-    private int getKeysWithoutKeyFamily() {
+    protected int getKeysWithoutKeyFamily() {
         return Math.min(TableSegment.MAXIMUM_BATCH_KEY_COUNT, getKeyFamilyCount() * getKeysPerKeyFamily());
     }
 
@@ -87,25 +88,25 @@ abstract class KeyValueTableTestSetup extends LeakDetectorTestSuite {
         }
     }
 
-    protected void forEveryKeyFamily(BiConsumer<String, List<Integer>> handler) {
+    protected void forEveryKeyFamily(BiConsumer<String, List<Long>> handler) {
         forEveryKeyFamily(true, handler);
     }
 
-    protected void forEveryKeyFamily(boolean includeNullKeyFamily, BiConsumer<String, List<Integer>> handler) {
+    protected void forEveryKeyFamily(boolean includeNullKeyFamily, BiConsumer<String, List<Long>> handler) {
         for (val keyFamily : getKeyFamilies()) {
             if (keyFamily == null && !includeNullKeyFamily) {
                 continue;
             }
             int keyCount = keyFamily == null ? getKeysWithoutKeyFamily() : getKeysPerKeyFamily();
-            val keyIds = new ArrayList<Integer>();
-            for (int keyId = 0; keyId < keyCount; keyId++) {
+            val keyIds = new ArrayList<Long>();
+            for (long keyId = 0; keyId < keyCount; keyId++) {
                 keyIds.add(keyId);
             }
             handler.accept(keyFamily, keyIds);
         }
     }
 
-    protected void checkValues(int iteration, Versions versions, KeyValueTable<Integer, String> keyValueTable) {
+    protected void checkValues(int iteration, Versions versions, KeyValueTable<Long, String> keyValueTable) {
         // Check individually.
         forEveryKey((keyFamily, keyId) -> {
             val hint = String.format("(KF=%s, Key=%s)", keyFamily, keyId);
@@ -132,7 +133,7 @@ abstract class KeyValueTableTestSetup extends LeakDetectorTestSuite {
         });
     }
 
-    protected void checkValue(Integer key, String expectedValue, Version expectedVersion, TableEntry<Integer, String> actualEntry, String hint) {
+    protected void checkValue(Long key, String expectedValue, Version expectedVersion, TableEntry<Long, String> actualEntry, String hint) {
         if (expectedVersion == null) {
             // Key was removed or never inserted.
             Assert.assertNull("Not expecting a value for removed key" + hint, actualEntry);
@@ -144,11 +145,11 @@ abstract class KeyValueTableTestSetup extends LeakDetectorTestSuite {
         }
     }
 
-    protected int getKey(int keyId) {
+    protected long getKey(long keyId) {
         return keyId;
     }
 
-    protected String getValue(int keyId, int iteration) {
+    protected String getValue(long keyId, int iteration) {
         return String.format("%s_%s", keyId, iteration);
     }
 
@@ -159,15 +160,15 @@ abstract class KeyValueTableTestSetup extends LeakDetectorTestSuite {
 
     protected static class Versions {
         @Getter(AccessLevel.PACKAGE)
-        private final HashMap<String, HashMap<Integer, VersionImpl>> versions = new HashMap<>();
+        private final HashMap<String, HashMap<Long, VersionImpl>> versions = new HashMap<>();
 
-        void add(String keyFamily, int keyId, Version kv) {
+        void add(String keyFamily, long keyId, Version kv) {
             keyFamily = adjustKeyFamily(keyFamily);
             val familyVersions = this.versions.computeIfAbsent(keyFamily, kf -> new HashMap<>());
             familyVersions.put(keyId, kv.asImpl());
         }
 
-        void remove(String keyFamily, int keyId) {
+        void remove(String keyFamily, long keyId) {
             keyFamily = adjustKeyFamily(keyFamily);
             val familyVersions = this.versions.getOrDefault(keyFamily, null);
             if (familyVersions != null) {
@@ -178,7 +179,7 @@ abstract class KeyValueTableTestSetup extends LeakDetectorTestSuite {
             }
         }
 
-        VersionImpl get(String keyFamily, int keyId) {
+        VersionImpl get(String keyFamily, long keyId) {
             keyFamily = adjustKeyFamily(keyFamily);
             val familyVersions = this.versions.getOrDefault(keyFamily, null);
             if (familyVersions != null) {
@@ -196,15 +197,15 @@ abstract class KeyValueTableTestSetup extends LeakDetectorTestSuite {
         }
     }
 
-    private static class IntegerSerializer implements Serializer<Integer> {
+    private static class LongSerializer implements Serializer<Long> {
         @Override
-        public ByteBuffer serialize(Integer value) {
-            return ByteBuffer.allocate(Integer.BYTES).putInt(0, value);
+        public ByteBuffer serialize(Long value) {
+            return ByteBuffer.allocate(Long.BYTES).putLong(0, value);
         }
 
         @Override
-        public Integer deserialize(ByteBuffer serializedValue) {
-            return serializedValue.getInt();
+        public Long deserialize(ByteBuffer serializedValue) {
+            return serializedValue.getLong();
         }
     }
 }

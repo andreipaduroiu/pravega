@@ -45,6 +45,18 @@ public class KeyValueTableFactoryImpl implements KeyValueTableFactory {
     }
 
     @Override
+    public <KeyT, ValueT> KeyValueTable<KeyT, ValueT> forKeyValueTableFixedKeyLength(
+            @NonNull String keyValueTableName,
+            @NonNull Serializer<KeyT> keySerializer,
+            @NonNull Serializer<ValueT> valueSerializer,
+            @NonNull KeyValueTableClientConfiguration clientConfiguration) {
+        val kvt = new KeyValueTableInfo(this.scope, keyValueTableName);
+        val provider = DelegationTokenProviderFactory.create(this.controller, kvt.getScope(), kvt.getKeyValueTableName(), AccessOperation.READ_WRITE);
+        val tsf = new TableSegmentFactoryImpl(this.controller, this.connectionPool, clientConfiguration, provider);
+        return new FixedKeyLengthTableImpl<>(kvt, tsf, this.controller, keySerializer, valueSerializer);
+    }
+
+    @Override
     public void close() {
         // These two are passed in via the constructor, however they are created inside the KeyValueTableFactory.withScope,
         // which creates this instance, so we are the only ones who use it.

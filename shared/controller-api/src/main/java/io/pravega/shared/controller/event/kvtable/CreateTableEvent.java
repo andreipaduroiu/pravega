@@ -31,6 +31,7 @@ public class CreateTableEvent implements ControllerEvent {
     private final String scopeName;
     private final String kvtName;
     private final int partitionCount;
+    private final int keyLength;
     private final long timestamp;
     private final long requestId;
     private final UUID tableId;
@@ -69,6 +70,7 @@ public class CreateTableEvent implements ControllerEvent {
             target.writeUTF(e.scopeName);
             target.writeUTF(e.kvtName);
             target.writeInt(e.partitionCount);
+            target.writeInt(e.keyLength);
             target.writeLong(e.timestamp);
             target.writeLong(e.requestId);
             target.writeUUID(e.tableId);
@@ -78,6 +80,7 @@ public class CreateTableEvent implements ControllerEvent {
             eb.scopeName(source.readUTF());
             eb.kvtName(source.readUTF());
             eb.partitionCount(source.readInt());
+            eb.keyLength(source.readInt());
             eb.timestamp(source.readLong());
             eb.requestId(source.readLong());
             eb.tableId(source.readUUID());

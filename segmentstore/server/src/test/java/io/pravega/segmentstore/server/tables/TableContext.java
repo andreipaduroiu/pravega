@@ -30,10 +30,18 @@ import io.pravega.segmentstore.contracts.AttributeUpdate;
 import io.pravega.segmentstore.contracts.MergeStreamSegmentResult;
 import io.pravega.segmentstore.contracts.ReadResult;
 import io.pravega.segmentstore.contracts.SegmentProperties;
+import io.pravega.segmentstore.contracts.SegmentType;
 import io.pravega.segmentstore.contracts.StreamSegmentExistsException;
 import io.pravega.segmentstore.contracts.StreamSegmentNotExistsException;
+import io.pravega.segmentstore.server.CacheManager;
+import io.pravega.segmentstore.server.CachePolicy;
 import io.pravega.segmentstore.server.DirectSegmentAccess;
+import io.pravega.segmentstore.server.SegmentContainer;
 import io.pravega.segmentstore.server.SegmentContainerExtension;
+import io.pravega.segmentstore.server.UpdateableSegmentMetadata;
+import io.pravega.segmentstore.server.containers.StreamSegmentMetadata;
+import io.pravega.segmentstore.storage.cache.CacheStorage;
+import io.pravega.segmentstore.storage.cache.DirectMemoryCache;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
@@ -41,10 +49,12 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import lombok.val;
 import org.junit.Assert;
 
 /**
@@ -52,9 +62,6 @@ import org.junit.Assert;
  * {@link ContainerTableExtension} (TableStore) service.
  */
 public class TableContext implements AutoCloseable {
-
-    private static final int DEFAULT_COMPACTION_SIZE = -1; // Inherits from parent.
-
     private final static int CONTAINER_ID = 1;
     private final static long SEGMENT_ID = 2L;
     private final static String SEGMENT_NAME = "TableSegment";
@@ -65,26 +72,30 @@ public class TableContext implements AutoCloseable {
     final CacheManager cacheManager;
     final ContainerTableExtensionImpl ext;
     final ScheduledExecutorService executorService;
-    final int defaultCompactionSize;
+    final TableExtensionConfig config;
     final Random random;
 
 
     TableContext(ScheduledExecutorService executorService) {
-        this(KeyHashers.DEFAULT_HASHER, DEFAULT_COMPACTION_SIZE, executorService);
+        this(KeyHashers.DEFAULT_HASHER, executorService);
     }
 
-    TableContext(int defaultCompactionSize, ScheduledExecutorService executorService) {
-        this(KeyHashers.DEFAULT_HASHER, defaultCompactionSize, executorService);
+    TableContext(TableExtensionConfig config, ScheduledExecutorService executorService) {
+        this(config, KeyHashers.DEFAULT_HASHER, executorService);
     }
 
-    TableContext(KeyHasher hasher, int maxCompactionSize, ScheduledExecutorService executorService) {
+    TableContext(KeyHasher hasher, ScheduledExecutorService executorService) {
+        this(TableExtensionConfig.builder().build(), hasher, executorService);
+    }
+
+    TableContext(TableExtensionConfig config, KeyHasher hasher, ScheduledExecutorService executorService) {
         this.hasher = hasher;
         this.executorService = executorService;
-        this.defaultCompactionSize = maxCompactionSize;
+        this.config = config;
         this.container = new MockSegmentContainer(() -> new SegmentMock(createSegmentMetadata(), executorService), CONTAINER_ID, executorService);
         this.cacheStorage = new DirectMemoryCache(Integer.MAX_VALUE);
         this.cacheManager = new CacheManager(CachePolicy.INFINITE, this.cacheStorage, executorService);
-        this.ext = createExtension(maxCompactionSize);
+        this.ext = createExtension();
         this.random = new Random(0);
     }
 
@@ -97,13 +108,11 @@ public class TableContext implements AutoCloseable {
     }
 
     ContainerTableExtensionImpl createExtension() {
-        return createExtension(defaultCompactionSize);
+        return createExtension(this.config);
     }
 
-    ContainerTableExtensionImpl createExtension(int maxCompactionSize) {
-        val r = new ContainerTableExtensionImpl(this.container, this.cacheManager, this.hasher, this.executorService);
-        r.setMaxCompactionSize(maxCompactionSize);
-        return r;
+    ContainerTableExtensionImpl createExtension(TableExtensionConfig config) {
+        return new ContainerTableExtensionImpl(config, this.container, this.cacheManager, this.hasher, this.executorService);
     }
 
     UpdateableSegmentMetadata createSegmentMetadata() {
@@ -116,49 +125,48 @@ public class TableContext implements AutoCloseable {
     SegmentMock segment() {
         return this.container.getSegment();
     }
-}
 
-class MockSegmentContainer implements SegmentContainer {
+    private static class MockSegmentContainer implements SegmentContainer {
 
-    private final AtomicReference<SegmentMock> segment;
-    private final Supplier<SegmentMock> segmentCreator;
-    private final ExecutorService executorService;
-    private final AtomicBoolean closed;
-    private final int containerId;
+        private final AtomicReference<SegmentMock> segment;
+        private final Supplier<SegmentMock> segmentCreator;
+        private final ExecutorService executorService;
+        private final AtomicBoolean closed;
+        private final int containerId;
 
-    MockSegmentContainer(Supplier<SegmentMock> segmentCreator, int containerId, ScheduledExecutorService executorService) {
-        this.segmentCreator = segmentCreator;
-        this.containerId = containerId;
-        this.executorService = executorService;
-        this.segment = new AtomicReference<>();
-        this.closed = new AtomicBoolean();
-    }
-
-    SegmentMock getSegment() {
-        return segment.get();
-    }
-
-    @Override
-    public int getId() {
-        return containerId;
-    }
-
-    @Override
-    public void close() {
-        this.closed.set(true);
-    }
-
-    @Override
-    public CompletableFuture<DirectSegmentAccess> forSegment(String segmentName, Duration timeout) {
-        Exceptions.checkNotClosed(this.closed.get(), this);
-        SegmentMock segment = this.segment.get();
-        if (segment == null) {
-            return Futures.failedFuture(new StreamSegmentNotExistsException(segmentName));
+        MockSegmentContainer(Supplier<SegmentMock> segmentCreator, int containerId, ScheduledExecutorService executorService) {
+            this.segmentCreator = segmentCreator;
+            this.containerId = containerId;
+            this.executorService = executorService;
+            this.segment = new AtomicReference<>();
+            this.closed = new AtomicBoolean();
         }
 
-        Assert.assertEquals("Unexpected segment name.", segment.getInfo().getName(), segmentName);
-        return CompletableFuture.supplyAsync(() -> segment, executorService);
-    }
+        SegmentMock getSegment() {
+            return segment.get();
+        }
+
+        @Override
+        public int getId() {
+            return containerId;
+        }
+
+        @Override
+        public void close() {
+            this.closed.set(true);
+        }
+
+        @Override
+        public CompletableFuture<DirectSegmentAccess> forSegment(String segmentName, Duration timeout) {
+            Exceptions.checkNotClosed(this.closed.get(), this);
+            SegmentMock segment = this.segment.get();
+            if (segment == null) {
+                return Futures.failedFuture(new StreamSegmentNotExistsException(segmentName));
+            }
+
+            Assert.assertEquals("Unexpected segment name.", segment.getInfo().getName(), segmentName);
+            return CompletableFuture.supplyAsync(() -> segment, executorService);
+        }
 
     @Override
     public CompletableFuture<Void> createStreamSegment(String segmentName, SegmentType segmentType,
@@ -177,133 +185,134 @@ class MockSegmentContainer implements SegmentContainer {
                 .thenRun(() -> this.segment.get().getMetadata().refreshType());
     }
 
-    @Override
-    public CompletableFuture<Void> deleteStreamSegment(String segmentName, Duration timeout) {
-        SegmentMock segment = this.segment.get();
-        if (segment == null) {
-            return Futures.failedFuture(new StreamSegmentNotExistsException(segmentName));
+        @Override
+        public CompletableFuture<Void> deleteStreamSegment(String segmentName, Duration timeout) {
+            SegmentMock segment = this.segment.get();
+            if (segment == null) {
+                return Futures.failedFuture(new StreamSegmentNotExistsException(segmentName));
+            }
+            Assert.assertEquals("Unexpected segment name.", segment.getInfo().getName(), segmentName);
+            Assert.assertTrue(this.segment.compareAndSet(segment, null));
+            return CompletableFuture.completedFuture(null);
         }
-        Assert.assertEquals("Unexpected segment name.", segment.getInfo().getName(), segmentName);
-        Assert.assertTrue(this.segment.compareAndSet(segment, null));
-        return CompletableFuture.completedFuture(null);
-    }
 
-    //region Not Implemented Methods
+        //region Not Implemented Methods
 
-    @Override
-    public Collection<SegmentProperties> getActiveSegments() {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public Collection<SegmentProperties> getActiveSegments() {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public <T extends SegmentContainerExtension> T getExtension(Class<T> extensionClass) {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public <T extends SegmentContainerExtension> T getExtension(Class<T> extensionClass) {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public CompletableFuture<Void> flushToStorage(Duration timeout) {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public CompletableFuture<Void> flushToStorage(Duration timeout) {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public Service startAsync() {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public Service startAsync() {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public boolean isRunning() {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public boolean isRunning() {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public State state() {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public State state() {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public Service stopAsync() {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public Service stopAsync() {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public void awaitRunning() {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public void awaitRunning() {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public void awaitRunning(long timeout, TimeUnit unit) {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public void awaitRunning(long timeout, TimeUnit unit) {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public void awaitTerminated() {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public void awaitTerminated() {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public void awaitTerminated(long timeout, TimeUnit unit) {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public void awaitTerminated(long timeout, TimeUnit unit) {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public Throwable failureCause() {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public Throwable failureCause() {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public void addListener(Listener listener, Executor executor) {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public void addListener(Listener listener, Executor executor) {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public CompletableFuture<Long> append(String streamSegmentName, BufferView data, Collection<AttributeUpdate> attributeUpdates, Duration timeout) {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public CompletableFuture<Long> append(String streamSegmentName, BufferView data, Collection<AttributeUpdate> attributeUpdates, Duration timeout) {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public CompletableFuture<Long> append(String streamSegmentName, long offset, BufferView data, Collection<AttributeUpdate> attributeUpdates, Duration timeout) {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public CompletableFuture<Long> append(String streamSegmentName, long offset, BufferView data, Collection<AttributeUpdate> attributeUpdates, Duration timeout) {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public CompletableFuture<Void> updateAttributes(String streamSegmentName, Collection<AttributeUpdate> attributeUpdates, Duration timeout) {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public CompletableFuture<Void> updateAttributes(String streamSegmentName, Collection<AttributeUpdate> attributeUpdates, Duration timeout) {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
     @Override
     public CompletableFuture<Map<AttributeId, Long>> getAttributes(String streamSegmentName, Collection<AttributeId> attributeIds, boolean cache, Duration timeout) {
         throw new UnsupportedOperationException("Not Expected");
     }
 
-    @Override
-    public CompletableFuture<ReadResult> read(String streamSegmentName, long offset, int maxLength, Duration timeout) {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public CompletableFuture<ReadResult> read(String streamSegmentName, long offset, int maxLength, Duration timeout) {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public CompletableFuture<SegmentProperties> getStreamSegmentInfo(String streamSegmentName, Duration timeout) {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public CompletableFuture<SegmentProperties> getStreamSegmentInfo(String streamSegmentName, Duration timeout) {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public CompletableFuture<MergeStreamSegmentResult> mergeStreamSegment(String targetSegmentName, String sourceSegmentName, Duration timeout) {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public CompletableFuture<MergeStreamSegmentResult> mergeStreamSegment(String targetSegmentName, String sourceSegmentName, Duration timeout) {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public CompletableFuture<Long> sealStreamSegment(String streamSegmentName, Duration timeout) {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public CompletableFuture<Long> sealStreamSegment(String streamSegmentName, Duration timeout) {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public CompletableFuture<Void> truncateStreamSegment(String streamSegmentName, long offset, Duration timeout) {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public CompletableFuture<Void> truncateStreamSegment(String streamSegmentName, long offset, Duration timeout) {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    @Override
-    public boolean isOffline() {
-        throw new UnsupportedOperationException("Not Expected");
-    }
+        @Override
+        public boolean isOffline() {
+            throw new UnsupportedOperationException("Not Expected");
+        }
 
-    //endregion
+        //endregion
+    }
 }

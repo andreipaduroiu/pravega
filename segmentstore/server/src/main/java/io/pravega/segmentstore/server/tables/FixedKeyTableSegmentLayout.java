@@ -65,7 +65,7 @@ import lombok.val;
 class FixedKeyTableSegmentLayout extends TableSegmentLayout {
     //region Constructor
 
-    FixedKeyTableSegmentLayout(SegmentContainer segmentContainer, Config config, ScheduledExecutorService executor) {
+    FixedKeyTableSegmentLayout(SegmentContainer segmentContainer, TableExtensionConfig config, ScheduledExecutorService executor) {
         super(segmentContainer, config, executor);
     }
 
@@ -93,6 +93,7 @@ class FixedKeyTableSegmentLayout extends TableSegmentLayout {
         ensureValidKeyLength("", config.getKeyLength());
         Preconditions.checkArgument(config.getKeyLength() % Long.BYTES == 0, "KeyLength must be a multiple of %s; given %s.", Long.BYTES, config.getKeyLength());
         attributes.put(Attributes.ATTRIBUTE_ID_LENGTH, (long) config.getKeyLength());
+        attributes.putAll(this.config.getDefaultCompactionAttributes());
     }
 
     @Override
@@ -125,6 +126,10 @@ class FixedKeyTableSegmentLayout extends TableSegmentLayout {
             attributeUpdates.add(au);
             batchOffsets.add(batchOffset);
             batchOffset += this.serializer.getUpdateLength(e);
+        }
+
+        if (batchOffset > this.config.getMaxBatchSize()) {
+            throw new UpdateBatchTooLargeException(batchOffset, this.config.getMaxBatchSize());
         }
 
         val serializedEntries = this.serializer.serializeUpdate(entries);

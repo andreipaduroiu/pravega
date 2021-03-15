@@ -11,12 +11,12 @@ package io.pravega.segmentstore.server.tables;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
+import io.pravega.segmentstore.contracts.AttributeId;
 import io.pravega.segmentstore.contracts.Attributes;
 import io.pravega.segmentstore.contracts.SegmentProperties;
 import io.pravega.segmentstore.contracts.tables.TableAttributes;
 import java.time.Duration;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.TimeoutException;
 import lombok.Builder;
 import lombok.Data;
@@ -82,7 +82,7 @@ class TableExtensionConfig {
      * The default Segment Attributes to set for every new Table Segment. These values will override the corresponding
      * defaults from {@link TableAttributes#DEFAULT_VALUES}.
      */
-    Map<UUID, Long> getDefaultCompactionAttributes() {
+    Map<AttributeId, Long> getDefaultCompactionAttributes() {
         return ImmutableMap.of(TableAttributes.MIN_UTILIZATION, getDefaultMinUtilization(),
                 Attributes.ROLLOVER_SIZE, getDefaultRolloverSize());
     }

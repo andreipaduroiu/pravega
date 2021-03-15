@@ -61,11 +61,11 @@ class HashTableSegmentLayout extends TableSegmentLayout {
     private final ContainerKeyIndex keyIndex;
 
     HashTableSegmentLayout(SegmentContainer segmentContainer, @NonNull CacheManager cacheManager, KeyHasher hasher,
-                           Config config, ScheduledExecutorService executorService) {
+                           TableExtensionConfig config, ScheduledExecutorService executorService) {
         super(segmentContainer, config, executorService);
         this.hasher = hasher;
         this.sortedKeyIndex = createSortedIndex();
-        this.keyIndex = new ContainerKeyIndex(segmentContainer.getId(), cacheManager, this.sortedKeyIndex, this.hasher, this.executor);
+        this.keyIndex = new ContainerKeyIndex(segmentContainer.getId(), config, cacheManager, this.sortedKeyIndex, this.hasher, this.executor);
     }
 
     private ContainerSortedKeyIndex createSortedIndex() {
@@ -90,6 +90,7 @@ class HashTableSegmentLayout extends TableSegmentLayout {
         if (segmentType.isSortedTableSegment()) {
             attributes.put(TableAttributes.SORTED, Attributes.BOOLEAN_TRUE);
         }
+        attributes.putAll(this.config.getDefaultCompactionAttributes());
     }
 
     @Override
@@ -339,6 +340,9 @@ class HashTableSegmentLayout extends TableSegmentLayout {
 
         Preconditions.checkArgument(batch.getLength() <= MAX_BATCH_SIZE,
                 "Update Batch length (%s) exceeds the maximum limit.", MAX_BATCH_SIZE);
+        if (batch.getLength() > this.config.getMaxBatchSize()) {
+            throw new UpdateBatchTooLargeException(batch.getLength(), this.config.getMaxBatchSize());
+        }
         return batch;
     }
 
@@ -401,8 +405,8 @@ class HashTableSegmentLayout extends TableSegmentLayout {
         }
 
         @Override
-        public void notifyIndexOffsetChanged(long lastIndexedOffset) {
-            HashTableSegmentLayout.this.keyIndex.notifyIndexOffsetChanged(this.metadata.getId(), lastIndexedOffset);
+        public void notifyIndexOffsetChanged(long lastIndexedOffset, int processedSizeBytes) {
+            HashTableSegmentLayout.this.keyIndex.notifyIndexOffsetChanged(this.metadata.getId(), lastIndexedOffset, processedSizeBytes);
         }
 
         @Override
@@ -413,7 +417,7 @@ class HashTableSegmentLayout extends TableSegmentLayout {
         @Override
         public void close() {
             // Tell the KeyIndex that it's ok to clear any tail-end cache.
-            HashTableSegmentLayout.this.keyIndex.notifyIndexOffsetChanged(this.metadata.getId(), -1L);
+            HashTableSegmentLayout.this.keyIndex.notifyIndexOffsetChanged(this.metadata.getId(), -1L, 0);
         }
     }
 

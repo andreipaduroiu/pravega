@@ -29,7 +29,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
-import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
@@ -48,10 +47,10 @@ abstract class TableSegmentLayout implements AutoCloseable {
     protected final SegmentContainer segmentContainer;
     protected final ScheduledExecutorService executor;
     protected final EntrySerializer serializer;
-    protected final Config config;
+    protected final TableExtensionConfig config;
     protected final String traceObjectId;
 
-    protected TableSegmentLayout(@NonNull SegmentContainer segmentContainer, @NonNull Config config, @NonNull ScheduledExecutorService executor) {
+    protected TableSegmentLayout(@NonNull SegmentContainer segmentContainer, @NonNull TableExtensionConfig config, @NonNull ScheduledExecutorService executor) {
         this.segmentContainer = segmentContainer;
         this.config = config;
         this.executor = executor;
@@ -94,9 +93,10 @@ abstract class TableSegmentLayout implements AutoCloseable {
         private final Collection<T> entries;
     }
 
-    @Data
-    @AllArgsConstructor
-    static class Config {
-        private volatile int maxCompactionSize;
+    public static class UpdateBatchTooLargeException extends IllegalArgumentException {
+        UpdateBatchTooLargeException(int length, int maxLength) {
+            super(String.format("Update Batch length %s exceeds the maximum limit %s.", length, maxLength));
+        }
     }
+
 }

@@ -10,15 +10,12 @@
 package io.pravega.segmentstore.server.tables;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableMap;
 import io.pravega.common.Exceptions;
 import io.pravega.common.TimeoutTimer;
 import io.pravega.common.util.AsyncIterator;
 import io.pravega.common.util.BufferView;
-import io.pravega.segmentstore.contracts.AttributeId;
 import io.pravega.segmentstore.contracts.AttributeUpdate;
 import io.pravega.segmentstore.contracts.AttributeUpdateType;
-import io.pravega.segmentstore.contracts.Attributes;
 import io.pravega.segmentstore.contracts.SegmentType;
 import io.pravega.segmentstore.contracts.tables.IteratorArgs;
 import io.pravega.segmentstore.contracts.tables.IteratorItem;
@@ -36,11 +33,11 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
+import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
@@ -52,27 +49,14 @@ import lombok.val;
 public class ContainerTableExtensionImpl implements ContainerTableExtension {
     //region Members
 
-    /**
-     * The default value to supply to a {@link WriterTableProcessor} to indicate how big compactions need to be.
-     * We need to return a value that is large enough to encompass the largest possible Table Entry (otherwise
-     * compaction will stall), but not too big, as that will introduce larger indexing pauses when compaction is running.
-     */
-    private static final int DEFAULT_MAX_COMPACTION_SIZE = 4 * EntrySerializer.MAX_SERIALIZATION_LENGTH; // Approx 4MB.
-    /**
-     * The default Segment Attributes to set for every new Table Segment. These values will override the corresponding
-     * defaults from {@link TableAttributes#DEFAULT_VALUES}.
-     */
-    @VisibleForTesting
-    static final Map<AttributeId, Long> DEFAULT_COMPACTION_ATTRIBUTES = ImmutableMap.of(TableAttributes.MIN_UTILIZATION, 75L,
-            Attributes.ROLLOVER_SIZE, 4L * DEFAULT_MAX_COMPACTION_SIZE);
-
     private final SegmentContainer segmentContainer;
     private final ScheduledExecutorService executor;
-    private final TableSegmentLayout.Config layoutConfig;
     private final FixedKeyTableSegmentLayout fixedKeyLayout;
     private final HashTableSegmentLayout hashTableLayout;
     private final AtomicBoolean closed;
     private final String traceObjectId;
+    @Getter
+    private final TableExtensionConfig config;
 
     //endregion
 
@@ -86,7 +70,7 @@ public class ContainerTableExtensionImpl implements ContainerTableExtension {
      * @param executor         An Executor to use for async tasks.
      */
     public ContainerTableExtensionImpl(SegmentContainer segmentContainer, CacheManager cacheManager, ScheduledExecutorService executor) {
-        this(segmentContainer, cacheManager, KeyHasher.sha256(), executor);
+        this(TableExtensionConfig.builder().build(), segmentContainer, cacheManager, KeyHasher.sha256(), executor);
     }
 
     /**
@@ -98,13 +82,13 @@ public class ContainerTableExtensionImpl implements ContainerTableExtension {
      * @param executor         An Executor to use for async tasks.
      */
     @VisibleForTesting
-    ContainerTableExtensionImpl(@NonNull SegmentContainer segmentContainer, @NonNull CacheManager cacheManager,
-                                @NonNull KeyHasher hasher, @NonNull ScheduledExecutorService executor) {
+    ContainerTableExtensionImpl(@NonNull TableExtensionConfig config, @NonNull SegmentContainer segmentContainer,
+                                @NonNull CacheManager cacheManager, @NonNull KeyHasher hasher, @NonNull ScheduledExecutorService executor) {
+        this.config = config;
         this.segmentContainer = segmentContainer;
         this.executor = executor;
-        this.layoutConfig = new TableSegmentLayout.Config(DEFAULT_MAX_COMPACTION_SIZE);
-        this.hashTableLayout = new HashTableSegmentLayout(this.segmentContainer, cacheManager, hasher, this.layoutConfig, this.executor);
-        this.fixedKeyLayout = new FixedKeyTableSegmentLayout(this.segmentContainer, this.layoutConfig, this.executor);
+        this.hashTableLayout = new HashTableSegmentLayout(this.segmentContainer, cacheManager, hasher, this.config, this.executor);
+        this.fixedKeyLayout = new FixedKeyTableSegmentLayout(this.segmentContainer, this.config, this.executor);
         this.closed = new AtomicBoolean();
         this.traceObjectId = String.format("TableExtension[%d]", this.segmentContainer.getId());
     }
@@ -165,7 +149,6 @@ public class ContainerTableExtensionImpl implements ContainerTableExtension {
         Exceptions.checkNotClosed(this.closed.get(), this);
         segmentType = SegmentType.builder(segmentType).tableSegment().build(); // Ensure at least a TableSegment type.
         val attributes = new HashMap<>(TableAttributes.DEFAULT_VALUES);
-        attributes.putAll(DEFAULT_COMPACTION_ATTRIBUTES);
         selectLayout(segmentName, segmentType).setNewSegmentAttributes(segmentType, config, attributes);
         val attributeUpdates = attributes
                 .entrySet().stream()
@@ -255,17 +238,6 @@ public class ContainerTableExtensionImpl implements ContainerTableExtension {
     //endregion
 
     //region Helpers
-
-    /**
-     * Updates the {@link TableSegmentLayout.Config#getMaxCompactionSize()} with the given value.
-     * By default this value is set to {@link #DEFAULT_MAX_COMPACTION_SIZE}.
-     *
-     * @param value The maximum length to compact at each step.
-     */
-    @VisibleForTesting
-    protected void setMaxCompactionSize(int value) {
-        this.layoutConfig.setMaxCompactionSize(value);
-    }
 
     private void logRequest(String requestName, Object... args) {
         log.debug("{}: {} {}", this.traceObjectId, requestName, args);

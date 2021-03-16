@@ -69,18 +69,6 @@ class MemoryStateUpdater {
 
     //region Operations
 
-    void registerReadListener(@NonNull ThrottleSourceListener listener) {
-        this.readListeners.register(listener);
-    }
-
-    void notifyLogRead() {
-        this.readListeners.notifySourceChanged();
-    }
-
-    public int getInMemoryOperationLogSize() {
-        return this.inMemoryOperationLog.size();
-    }
-
     /**
      * Registers a {@link ThrottleSourceListener} that will be notified on every Operation Log read.
      *

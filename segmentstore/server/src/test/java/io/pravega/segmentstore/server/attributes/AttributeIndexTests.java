@@ -683,7 +683,7 @@ public class AttributeIndexTests extends ThreadPooledTestSuite {
      */
     @Test
     public void testNonEssentialCache() throws Exception {
-        val attributeId = UUID.randomUUID();
+        val attributeId = AttributeId.randomUUID();
         val config = AttributeIndexConfig
                 .builder()
                 .with(AttributeIndexConfig.MAX_INDEX_PAGE_SIZE, 1024)
@@ -696,7 +696,7 @@ public class AttributeIndexTests extends ThreadPooledTestSuite {
         // 1. Populate and verify first index.
         @Cleanup
         val idx = (SegmentAttributeBTreeIndex) context.index.forSegment(SEGMENT_ID, TIMEOUT).join();
-        val expectedValues = new HashMap<UUID, Long>();
+        val expectedValues = new HashMap<AttributeId, Long>();
         expectedValues.put(attributeId, 1L);
 
         // Populate data.

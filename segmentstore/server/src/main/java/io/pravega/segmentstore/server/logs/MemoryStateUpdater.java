@@ -82,6 +82,26 @@ class MemoryStateUpdater {
     }
 
     /**
+     * Registers a {@link ThrottleSourceListener} that will be notified on every Operation Log read.
+     *
+     * @param listener The {@link ThrottleSourceListener} to register.
+     */
+    void registerReadListener(@NonNull ThrottleSourceListener listener) {
+        this.readListeners.register(listener);
+    }
+
+    /**
+     * Notifies all registered {@link ThrottleSourceListener} that an Operation Log read has been truncated.
+     */
+    void notifyLogRead() {
+        this.readListeners.notifySourceChanged();
+    }
+
+    public int getInMemoryOperationLogSize() {
+        return this.inMemoryOperationLog.size();
+    }
+
+    /**
      * Gets the {@link CacheUtilizationProvider} shared across all Segment Containers hosted in this process that can
      * be used to query the Cache State.
      *
@@ -110,6 +130,16 @@ class MemoryStateUpdater {
     void exitRecoveryMode(boolean successfulRecovery) throws DataCorruptionException {
         this.readIndex.exitRecoveryMode(successfulRecovery);
         this.recoveryMode.set(false);
+    }
+
+    /**
+     * Performs a cleanup of the {@link ReadIndex} by releasing resources allocated for segments that are no longer active
+     * and trimming to cache to the minimum essential.
+     */
+    void cleanupReadIndex() {
+        Preconditions.checkState(this.recoveryMode.get(), "cleanupReadIndex can only be performed in recovery mode.");
+        this.readIndex.cleanup(null);
+        this.readIndex.trimCache();
     }
 
     /**

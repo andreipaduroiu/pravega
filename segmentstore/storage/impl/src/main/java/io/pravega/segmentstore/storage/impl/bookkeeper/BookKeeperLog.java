@@ -402,7 +402,7 @@ class BookKeeperLog implements DurableDataLog {
             return false;
         } else {
             if (cleanupResult.getRemovedCount() > 0) {
-                notifyQueueChangeListeners();
+                this.queueStateChangeListeners.notifySourceChanged();
             }
 
             if (cleanupResult.getStatus() == WriteQueue.CleanupStatus.QueueEmpty) {
@@ -728,10 +728,6 @@ class BookKeeperLog implements DurableDataLog {
 
         log.info("{}: Truncated up to {}.", this.traceObjectId, upToAddress);
         LoggerHelpers.traceLeave(log, this.traceObjectId, "tryTruncate", traceId, upToAddress);
-    }
-
-    private void notifyQueueChangeListeners() {
-        this.queueStateChangeListeners.notifySourceChanged();
     }
 
     //endregion

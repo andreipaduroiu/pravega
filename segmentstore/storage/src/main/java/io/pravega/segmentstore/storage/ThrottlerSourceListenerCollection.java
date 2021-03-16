@@ -9,6 +9,7 @@
  */
 package io.pravega.segmentstore.storage;
 
+import com.google.common.annotations.VisibleForTesting;
 import io.pravega.common.Exceptions;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -17,12 +18,19 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * A collection of {@link ThrottleSourceListener}.
+ * A collection of {@link ThrottleSourceListener} objects.
  */
 @Slf4j
 public class ThrottlerSourceListenerCollection {
     @GuardedBy("listeners")
     private final HashSet<ThrottleSourceListener> listeners = new HashSet<>();
+
+    @VisibleForTesting
+    int getListenerCount() {
+        synchronized (this.listeners) {
+            return this.listeners.size();
+        }
+    }
 
     /**
      * Registers a new {@link ThrottleSourceListener}.

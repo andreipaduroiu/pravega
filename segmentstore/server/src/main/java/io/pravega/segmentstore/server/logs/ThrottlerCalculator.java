@@ -66,15 +66,15 @@ class ThrottlerCalculator {
     @VisibleForTesting
     static final double DURABLE_DATALOG_THROTTLE_THRESHOLD_FRACTION = 0.1;
     /**
-     * Maximum size (in number of operations) of the DurableLog, above which maximum throttling will be applied.
+     * Maximum size (in number of operations) of the OperationLog, above which maximum throttling will be applied.
      */
     @VisibleForTesting
-    static final int DURABLE_LOG_MAX_SIZE = 1_000_000;
+    static final int OPERATION_LOG_MAX_SIZE = 1_000_000;
     /**
-     * Desired size (in number of operations) of the DurableLog, above which a gradual throttling will begin.
+     * Desired size (in number of operations) of the OperationLog, above which a gradual throttling will begin.
      */
     @VisibleForTesting
-    static final int DURABLE_LOG_TARGET_SIZE = (int) (DURABLE_LOG_MAX_SIZE * 0.95);
+    static final int OPERATION_LOG_TARGET_SIZE = (int) (OPERATION_LOG_MAX_SIZE * 0.95);
     @Singular
     private final List<Throttler> throttlers;
 
@@ -297,34 +297,37 @@ class ThrottlerCalculator {
         }
     }
 
-    private static class DurableLogThrottler extends Throttler {
+    /**
+     * Calculates the amount of time to wait before processing more operations from the queue in order to relieve pressure
+     * from the OperationLog. This is based solely on the number of operations accumulated in the OperationLog.
+     */
+    @RequiredArgsConstructor
+    private static class OperationLogThrottler extends Throttler {
+        private static final double SIZE_SPAN = OPERATION_LOG_MAX_SIZE - OPERATION_LOG_TARGET_SIZE;
         @NonNull
-        private final Supplier<Integer> getDurableLogSize;
-        private final int baseDelay;
-
-        DurableLogThrottler(@NonNull Supplier<Integer> getDurableLogSize) {
-            this.getDurableLogSize = getDurableLogSize;
-            this.baseDelay = calculateBaseDelay(DURABLE_LOG_MAX_SIZE, this::getDelayMultiplier);
-        }
+        private final Supplier<Integer> getOperationLogSize;
 
         @Override
         boolean isThrottlingRequired() {
-            return this.getDurableLogSize.get() > DURABLE_LOG_TARGET_SIZE;
+            return this.getOperationLogSize.get() > OPERATION_LOG_TARGET_SIZE;
         }
 
         @Override
         int getDelayMillis() {
             // We only throttle if we exceed the target log size. We increase the throttling amount in a linear fashion.
-            return (int) (getDelayMultiplier(this.getDurableLogSize.get()) * this.baseDelay);
+            int size = this.getOperationLogSize.get();
+            if (size <= OPERATION_LOG_TARGET_SIZE) {
+                return 0;
+            } else if (size >= OPERATION_LOG_MAX_SIZE) {
+                return MAX_DELAY_MILLIS;
+            } else {
+                return (int) (MAX_DELAY_MILLIS * (this.getOperationLogSize.get() - OPERATION_LOG_TARGET_SIZE) / SIZE_SPAN);
+            }
         }
 
         @Override
         ThrottlerName getName() {
-            return ThrottlerName.DurableLog;
-        }
-
-        private double getDelayMultiplier(int size) {
-            return 100 * (size - DURABLE_LOG_TARGET_SIZE);
+            return ThrottlerName.OperationLog;
         }
     }
 
@@ -364,8 +367,8 @@ class ThrottlerCalculator {
             return throttler(new DurableDataLogThrottler(writeSettings, getQueueStats));
         }
 
-        ThrottlerCalculatorBuilder durableLogThrottler(Supplier<Integer> getDurableLogSize) {
-            return throttler(new DurableLogThrottler(getDurableLogSize));
+        ThrottlerCalculatorBuilder operationLogThrottler(Supplier<Integer> getDurableLogSize) {
+            return throttler(new OperationLogThrottler(getDurableLogSize));
         }
     }
 
@@ -432,9 +435,9 @@ class ThrottlerCalculator {
          */
         DurableDataLog(true),
         /**
-         * Throttling is required due to excessive accumulated Operations in DurableLog (not yet truncated).
+         * Throttling is required due to excessive accumulated Operations in OperationLog (not yet truncated).
          */
-        DurableLog(true);
+        OperationLog(true);
 
         @Getter
         private final boolean interruptible;

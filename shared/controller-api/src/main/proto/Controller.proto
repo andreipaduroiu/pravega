@@ -149,6 +149,7 @@ message KeyValueTableConfig {
     string scope = 1;
     string kvtName = 2;
     int32 partitionCount = 3;
+    int32 keyLength = 4;
 }
 
 message KeyValueTableInfo {

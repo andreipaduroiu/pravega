@@ -11,6 +11,7 @@ package io.pravega.client.admin.impl;
 
 import com.google.common.annotations.Beta;
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import io.pravega.client.ClientConfig;
 import io.pravega.client.admin.KeyValueTableInfo;
 import io.pravega.client.admin.KeyValueTableManager;
@@ -103,6 +104,7 @@ public class KeyValueTableManagerImpl implements KeyValueTableManager {
         Exceptions.checkNotClosed(this.closed.get(), this);
         NameUtils.validateUserKeyValueTableName(keyValueTableName);
         NameUtils.validateUserScopeName(scopeName);
+        Preconditions.checkArgument(config.getKeyLength() % 8 == 0, "keyLength must be a multiple of 8; given %s.", config.getKeyLength());
         log.info("Creating scope/key-value-table: {}/{} with configuration: {}", scopeName, keyValueTableName, config);
         return Futures.getThrowingException(this.controller.createKeyValueTable(
                 scopeName, keyValueTableName, config));

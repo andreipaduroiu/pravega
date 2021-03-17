@@ -139,7 +139,7 @@ public final class ModelHelper {
         Preconditions.checkNotNull(config.getScope(), "scope");
         Preconditions.checkNotNull(config.getKvtName(), "kvtName");
         Preconditions.checkArgument(config.getPartitionCount() > 0, "Number of partitions should be > 0.");
-        return KeyValueTableConfiguration.builder().partitionCount(config.getPartitionCount()).build();
+        return KeyValueTableConfiguration.builder().partitionCount(config.getPartitionCount()).keyLength(config.getKeyLength()).build();
     }
 
     /**
@@ -426,7 +426,7 @@ public final class ModelHelper {
         Preconditions.checkNotNull(kvtName, "kvtName");
         Preconditions.checkArgument(config.getPartitionCount() > 0, "Number of partitions should be > 0.");
         return KeyValueTableConfig.newBuilder().setScope(scopeName)
-                .setKvtName(kvtName).setPartitionCount(config.getPartitionCount()).build();
+                .setKvtName(kvtName).setPartitionCount(config.getPartitionCount()).setKeyLength(config.getKeyLength()).build();
     }
 
     /**

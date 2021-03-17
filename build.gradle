@@ -828,6 +828,21 @@ project('cli:user') {
         source = delombok.outputDir
         failOnError = true
     }
+
+    task startUserCli(type: JavaExec) {
+        main = "io.pravega.cli.user.UserCLIRunner"
+        classpath = sourceSets.main.runtimeClasspath
+        standardInput = System.in
+        systemProperties System.getProperties()
+        //systemProperties 'logback.configurationFile' : new File("${project.rootDir}/config/standalone-logback.xml")
+        //systemProperties 'singlenode.configurationFile' : new File("${project.rootDir}/config/standalone-config.properties")
+
+        if (systemProperties.get("extDirs") != null) {
+            classpath += files(systemProperties.get("extDirs"))
+        }
+
+        jvmArgs "-Xdebug", "-Xrunjdwp:server=y,transport=dt_socket,address=8000,suspend=n"
+    }
 }
 
 

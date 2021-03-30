@@ -49,7 +49,6 @@ abstract class TableSegmentLayout implements AutoCloseable {
      * Default value used for when no offset is provided for a remove or put call.
      */
     protected static final long NO_OFFSET = -1;
-    protected static final int MAX_BATCH_SIZE = 32 * EntrySerializer.MAX_SERIALIZATION_LENGTH;
 
     protected final SegmentContainer segmentContainer;
     protected final ScheduledExecutorService executor;

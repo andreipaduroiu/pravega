@@ -345,8 +345,6 @@ class HashTableSegmentLayout extends TableSegmentLayout {
             batch.add(key, this.hasher.hash(key.getKey()), length);
         }
 
-        Preconditions.checkArgument(batch.getLength() <= MAX_BATCH_SIZE,
-                "Update Batch length (%s) exceeds the maximum limit.", MAX_BATCH_SIZE);
         if (batch.getLength() > this.config.getMaxBatchSize()) {
             throw new UpdateBatchTooLargeException(batch.getLength(), this.config.getMaxBatchSize());
         }

@@ -26,29 +26,35 @@ import lombok.Cleanup;
 import lombok.val;
 
 /**
- * Lists all Attributes in a Segment's Attribute Index.
+ * Scans a Table Segment for Table Entries (valid or invalid).
  */
-public class ListSegmentAttributesCommand extends StorageCommand {
-    private static final int MAX_AT_ONCE = 1000;
+public class StorageScanTableEntriesCommand extends StorageCommand {
+    private static final int MAX_AT_ONCE = 10000;
 
-    public ListSegmentAttributesCommand(CommandArgs args) {
+    public StorageScanTableEntriesCommand(CommandArgs args) {
         super(args);
     }
 
     public static CommandDescriptor descriptor() {
-        return new CommandDescriptor(COMPONENT, "list-attributes", "Lists all attributes for a segment (NOTE: may be a lot).",
+        return new CommandDescriptor(COMPONENT, "scan-table-entries", "Scans a table entries for entries.",
                 new ArgDescriptor("segment-name", "Fully qualified segment name (include scope and stream)"),
+                new ArgDescriptor("start-offset", "Offset within the table segment to start scanning at"),
+                new ArgDescriptor("max-length", "Maximum number of bytes to scan"),
                 new ArgDescriptor("output-file-path", "[Optional] Path to (local) file where to write the result"));
     }
 
     @Override
     public void execute() throws Exception {
-        ensureArgCount(1, 2);
+        ensureArgCount(3, 4);
 
         final String segmentName = getArg(0);
         Preconditions.checkArgument(!Strings.isNullOrEmpty(segmentName), "Invalid segment name");
+        final long startOffset = getLongArg(1);
+        Preconditions.checkArgument(startOffset >= 0, "start-offset must be non-negative");
+        final int maxLength = getIntArg(2);
+        Preconditions.checkArgument(maxLength > 0, "max-length must be a positive integer");
 
-        final String targetPath = getCommandArgs().getArgs().size() == 1 ? null : getArg(1);
+        final String targetPath = getCommandArgs().getArgs().size() < 4 ? null : getArg(3);
 
         @Cleanup
         val storage = this.storageFactory.createStorageAdapter();
@@ -63,23 +69,23 @@ public class ListSegmentAttributesCommand extends StorageCommand {
         }
 
         val totalCount = new AtomicLong(0);
-        val iterator = segment.iterateAttributes().get(DEFAULT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-        boolean canContinue = true;
-        while (canContinue) {
-            val next = iterator.getNext().get(DEFAULT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-            if (next == null) {
-                break;
-            }
+        val validCount = new AtomicLong(0);
+        val invalidCount = new AtomicLong(0);
 
-            for (val attribute : next) {
-                totalCount.incrementAndGet();
-                if (!writer.write(formatAttribute(attribute))) {
-                    canContinue = false;
-                    break;
-                }
+        val iterator = segment.scanTableSegment(startOffset, maxLength).get(DEFAULT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        while (iterator.hasNext()) {
+            val entry = iterator.next();
+            if (entry instanceof DebugStorageSegment.ValidTableEntryInfo) {
+                validCount.incrementAndGet();
+            } else {
+                invalidCount.incrementAndGet();
+            }
+            totalCount.incrementAndGet();
+            if (!writer.write(formatTableEntry(entry))) {
+                break;
             }
         }
 
-        output("Found %s attribute(s).", totalCount);
+        output("Entries: %s, Valid: %s, Invalid: %s", totalCount, validCount, invalidCount);
     }
 }

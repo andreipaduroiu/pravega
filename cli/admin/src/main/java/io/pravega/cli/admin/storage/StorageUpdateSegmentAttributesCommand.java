@@ -19,24 +19,27 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import io.pravega.cli.admin.CommandArgs;
 import io.pravega.segmentstore.server.containers.DebugStorageSegment;
-import java.util.ArrayList;
+import java.util.AbstractMap;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import lombok.Cleanup;
 import lombok.val;
 
 /**
- * Gets a set of Attributes for a Segment (based on Attribute Id).
+ * Updates a set of attributes on a segment.
  */
-public class GetSegmentAttributesCommand extends StorageCommand {
-    public GetSegmentAttributesCommand(CommandArgs args) {
+public class StorageUpdateSegmentAttributesCommand extends StorageCommand {
+    public StorageUpdateSegmentAttributesCommand(CommandArgs args) {
         super(args);
     }
 
     public static CommandDescriptor descriptor() {
-        return new CommandDescriptor(COMPONENT, "get-attributes", "Gets a set of attributes for a segment.",
+        return new CommandDescriptor(COMPONENT, "update-attributes", "Updates a set of attributes for a segment.",
                 new ArgDescriptor("segment-name", "Fully qualified segment name (include scope and stream)"),
-                new ArgDescriptor("list-of-attribute-ids", "Space-separated list of attribute ids to retrieve."));
+                new ArgDescriptor("list-of-attribute-updates", "Space-separated list of attribute ids to values to update " +
+                        "(i.e., 'attribute1=value1 attribute2=value2 attribute3=value3' (value should be omitted for removals)."));
     }
 
     @Override
@@ -46,9 +49,22 @@ public class GetSegmentAttributesCommand extends StorageCommand {
         final String segmentName = getArg(0);
         Preconditions.checkArgument(!Strings.isNullOrEmpty(segmentName), "Invalid segment name");
 
-        val attributeIds = new ArrayList<UUID>();
+        val updatedValues = new HashMap<UUID, Long>();
+        output("These attributes are about to be updated:");
         for (int i = 1; i < getArgCount(); i++) {
-            attributeIds.add(getArg(i, UUID::fromString));
+            Map.Entry<UUID, Long> e = getArg(i, a -> {
+                int pos = a.lastIndexOf('=');
+                Preconditions.checkArgument(pos > 0, "Expected format of attribute=value");
+                val attributeId = UUID.fromString(a.substring(0, pos));
+                val value = (pos == a.length() - 1) ? null : Long.parseLong(a.substring(pos + 1));
+                return new AbstractMap.SimpleImmutableEntry<>(attributeId, value);
+            });
+            updatedValues.put(e.getKey(), e.getValue());
+            output("\t %s: %s", e.getKey(), e.getValue());
+        }
+
+        if (!confirmContinue()) {
+            return;
         }
 
         @Cleanup
@@ -57,10 +73,7 @@ public class GetSegmentAttributesCommand extends StorageCommand {
         @Cleanup
         val segment = new DebugStorageSegment(segmentName, storage, executorService());
 
-        val result = segment.getAttributes(attributeIds).get(DEFAULT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-        output("Listing %s/%s attribute(s):", result.size(), attributeIds.size());
-        for (val e : result.entrySet()) {
-            output("\t%s", formatAttribute(e));
-        }
+        segment.updateAttributes(updatedValues).get(DEFAULT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        output("Values updated successfully.");
     }
 }

@@ -44,15 +44,17 @@ import io.pravega.cli.admin.controller.ControllerListStreamsInScopeCommand;
 import io.pravega.cli.admin.dataRecovery.DurableLogRecoveryCommand;
 import io.pravega.cli.admin.dataRecovery.StorageListSegmentsCommand;
 import io.pravega.cli.admin.password.PasswordFileCreatorCommand;
-import io.pravega.cli.admin.cluster.GetClusterNodesCommand;
-import io.pravega.cli.admin.cluster.GetSegmentStoreByContainerCommand;
-import io.pravega.cli.admin.cluster.ListContainersCommand;
-import io.pravega.cli.admin.config.ConfigListCommand;
-import io.pravega.cli.admin.config.ConfigSetCommand;
 import io.pravega.cli.admin.segmentstore.GetSegmentAttributeCommand;
 import io.pravega.cli.admin.segmentstore.GetSegmentInfoCommand;
 import io.pravega.cli.admin.segmentstore.ReadSegmentRangeCommand;
 import io.pravega.cli.admin.segmentstore.UpdateSegmentAttributeCommand;
+import io.pravega.cli.admin.storage.StorageGetTableEntryCommand;
+import io.pravega.cli.admin.storage.StorageScanTableEntriesCommand;
+import io.pravega.cli.admin.storage.StorageGetSegmentAttributesCommand;
+import io.pravega.cli.admin.storage.StorageListSegmentAttributesCommand;
+import io.pravega.cli.admin.storage.StorageListTableEntriesIndexCommand;
+import io.pravega.cli.admin.storage.StorageReadSegmentCommand;
+import io.pravega.cli.admin.storage.StorageUpdateSegmentAttributesCommand;
 import io.pravega.cli.admin.utils.CLIControllerConfig;
 import io.pravega.client.ClientConfig;
 import io.pravega.client.connection.impl.ConnectionPool;
@@ -218,7 +220,7 @@ public abstract class AdminCommand {
         return getArg(index, String::toString);
     }
 
-    private <T> T getArg(int index, Function<String, T> converter) {
+    protected  <T> T getArg(int index, Function<String, T> converter) {
         String s = null;
         try {
             s = this.commandArgs.getArgs().get(index);
@@ -296,13 +298,14 @@ public abstract class AdminCommand {
                         .put(GetSegmentAttributeCommand::descriptor, GetSegmentAttributeCommand::new)
                         .put(UpdateSegmentAttributeCommand::descriptor, UpdateSegmentAttributeCommand::new)
                         .put(GetSegmentInfoCommand::descriptor, GetSegmentInfoCommand::new)
-                        .put(ReadSegmentCommand::descriptor, ReadSegmentCommand::new)
-                        .put(GetSegmentAttributesCommand::descriptor, GetSegmentAttributesCommand::new)
-                        .put(ListSegmentAttributesCommand::descriptor, ListSegmentAttributesCommand::new)
-                        .put(ListTableEntriesIndexCommand::descriptor, ListTableEntriesIndexCommand::new)
-                        .put(ScanTableEntriesCommand::descriptor, ScanTableEntriesCommand::new)
-                        .put(GetTableEntryCommand::descriptor, GetTableEntryCommand::new)
-                        .put(UpdateSegmentAttributesCommand::descriptor, UpdateSegmentAttributesCommand::new)
+
+                        .put(StorageReadSegmentCommand::descriptor, StorageReadSegmentCommand::new)
+                        .put(StorageGetSegmentAttributesCommand::descriptor, StorageGetSegmentAttributesCommand::new)
+                        .put(StorageListSegmentAttributesCommand::descriptor, StorageListSegmentAttributesCommand::new)
+                        .put(StorageListTableEntriesIndexCommand::descriptor, StorageListTableEntriesIndexCommand::new)
+                        .put(StorageScanTableEntriesCommand::descriptor, StorageScanTableEntriesCommand::new)
+                        .put(StorageGetTableEntryCommand::descriptor, StorageGetTableEntryCommand::new)
+                        .put(StorageUpdateSegmentAttributesCommand::descriptor, StorageUpdateSegmentAttributesCommand::new)
                         .build());
 
         /**

@@ -26,18 +26,17 @@ import lombok.Cleanup;
 import lombok.val;
 
 /**
- * Lists all Table Entries in a Table Segment that are still referenced from the index. Iterates through the index and
- * then reads the Table Entries pointed to by the index entries.
+ * Lists all Attributes in a Segment's Attribute Index.
  */
-public class ListTableEntriesIndexCommand extends StorageCommand {
-    private static final int MAX_AT_ONCE = 10000;
+public class StorageListSegmentAttributesCommand extends StorageCommand {
+    private static final int MAX_AT_ONCE = 1000;
 
-    public ListTableEntriesIndexCommand(CommandArgs args) {
+    public StorageListSegmentAttributesCommand(CommandArgs args) {
         super(args);
     }
 
     public static CommandDescriptor descriptor() {
-        return new CommandDescriptor(COMPONENT, "list-table-entries", "Lists all table entries for a table segment (NOTE: may be a lot).",
+        return new CommandDescriptor(COMPONENT, "list-attributes", "Lists all attributes for a segment (NOTE: may be a lot).",
                 new ArgDescriptor("segment-name", "Fully qualified segment name (include scope and stream)"),
                 new ArgDescriptor("output-file-path", "[Optional] Path to (local) file where to write the result"));
     }
@@ -64,10 +63,7 @@ public class ListTableEntriesIndexCommand extends StorageCommand {
         }
 
         val totalCount = new AtomicLong(0);
-        val validCount = new AtomicLong(0);
-        val invalidCount = new AtomicLong(0);
-
-        val iterator = segment.iterateTableEntriesFromIndex().get(DEFAULT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        val iterator = segment.iterateAttributes().get(DEFAULT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
         boolean canContinue = true;
         while (canContinue) {
             val next = iterator.getNext().get(DEFAULT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
@@ -75,20 +71,15 @@ public class ListTableEntriesIndexCommand extends StorageCommand {
                 break;
             }
 
-            for (val entry : next) {
-                if (entry instanceof DebugStorageSegment.ValidTableEntryInfo) {
-                    validCount.incrementAndGet();
-                } else {
-                    invalidCount.incrementAndGet();
-                }
+            for (val attribute : next) {
                 totalCount.incrementAndGet();
-                if (!writer.write(formatTableEntry(entry))) {
+                if (!writer.write(formatAttribute(attribute))) {
                     canContinue = false;
                     break;
                 }
             }
         }
 
-        output("Entries: %s, Valid: %s, Invalid: %s", totalCount, validCount, invalidCount);
+        output("Found %s attribute(s).", totalCount);
     }
 }

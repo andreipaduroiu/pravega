@@ -30,10 +30,10 @@ import lombok.val;
  * Reads (and downloads) a range of bytes from a segment (it can be a main segment or attribute segment, as long as it's
  * a valid LTS segment).
  */
-public class ReadSegmentCommand extends StorageCommand {
+public class StorageReadSegmentCommand extends StorageCommand {
     private static final long REPORT_FREQUENCY = 10 * 1024 * 1024;
 
-    public ReadSegmentCommand(CommandArgs args) {
+    public StorageReadSegmentCommand(CommandArgs args) {
         super(args);
     }
 

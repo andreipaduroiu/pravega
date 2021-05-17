@@ -28,8 +28,8 @@ import lombok.val;
 /**
  * Retrieves a single Table Entry from a Table Segment.
  */
-public class GetTableEntryCommand extends StorageCommand {
-    public GetTableEntryCommand(CommandArgs args) {
+public class StorageGetTableEntryCommand extends StorageCommand {
+    public StorageGetTableEntryCommand(CommandArgs args) {
         super(args);
     }
 

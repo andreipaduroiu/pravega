@@ -27,8 +27,8 @@ import lombok.val;
 /**
  * Gets information about a segment (it can be a main segment or attribute segment - as long as it's a valid LTS segment).
  */
-public class GetSegmentInfoCommand extends StorageCommand {
-    public GetSegmentInfoCommand(CommandArgs args) {
+public class StorageGetSegmentInfoCommand extends StorageCommand {
+    public StorageGetSegmentInfoCommand(CommandArgs args) {
         super(args);
     }
 

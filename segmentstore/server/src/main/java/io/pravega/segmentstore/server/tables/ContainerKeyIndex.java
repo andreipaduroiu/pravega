@@ -72,12 +72,12 @@ class ContainerKeyIndex implements AutoCloseable {
      * all registered calls will be failed with a {@link TimeoutException}.
      */
     @VisibleForTesting
-    static final Duration RECOVERY_TIMEOUT = Duration.ofSeconds(60);
+    static final Duration RECOVERY_TIMEOUT = Duration.ofSeconds(60*10); // 10 minutes - temporary.
     /**
      * The maximum unindexed length ({@link SegmentProperties#getLength() - {@link TableAttributes#INDEX_OFFSET}}) of a
      * Segment for which {@link #triggerCacheTailIndex} can be invoked.
      */
-    private static final int MAX_TAIL_CACHE_PRE_INDEX_LENGTH = 64 * 1024 * 1024;
+    private static final int MAX_TAIL_CACHE_PRE_INDEX_LENGTH = 1024 * 1024 * 1024; // 1GB - Temporary.
     @Getter
     private final IndexReader indexReader;
     private final ScheduledExecutorService executor;
